@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+src-tauri/target/
+frontend/node_modules/
+
+# Build outputs
+frontend/dist/
+src-tauri/target/
+src-tauri/gen/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Temp directory
+src-tauri-temp/
+
+# Embedded worktrees
+.worktrees/
