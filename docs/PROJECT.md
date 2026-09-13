@@ -207,6 +207,8 @@ Customer
 
 ### Phase 5 — Private Domain
 
+> Status (2026-09-14): Private Domain module implementation complete. See docs/PHASE-5-SUMMARY.md; open P0 follow-ups: security (auth/RBAC + sensitive-data protection) and NurturePlan execution engine.
+
 - Private Domain
 - Nurture
 - Content

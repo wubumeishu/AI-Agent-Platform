@@ -68,3 +68,39 @@
 **Status:** Accepted
 
 **Decision:** project-orchestrator 负责任务分解、路由、依赖、流程和看板状态，不作为默认万能开发者。
+
+---
+
+## ADR-009  Data Model Conventions (Private Domain & Beyond)
+
+**Status:** Accepted
+
+**Decision:** All entity tables use soft-delete `is_deleted` flag + UUID primary keys + `DateTime(timezone=True)` timestamps. Flexible/variable fields (contact_info, tags, extra_config, filter_config, sequence_steps) are stored as JSON columns.
+
+**Reason:** Consistent lifecycle handling, timezone-correctness across the desktop app, and schema flexibility without per-feature migrations.
+
+**Source:** Phase 5 Private Domain Architecture Review (t_a0195813), 2026-09-14
+
+---
+
+## ADR-010  NurturePlan Data/Execution Split
+
+**Status:** Accepted
+
+**Decision:** Phase 5 delivers the NurturePlan data model + API + segment rule engine only. The runtime execution layer (Scheduler Worker, Step Execution Engine, execution log, error handler) is deferred as a P0 follow-up (tracked on the board).
+
+**Reason:** Keeps the data layer independently testable (84/84 integrity tests pass) while the execution engine (scheduler/executor/logging) is scoped and staffed separately, avoiding a premature speculative implementation.
+
+**Source:** Phase 5 Private Domain Architecture Review P0 #3 (t_a0195813), 2026-09-14
+
+---
+
+## ADR-011  Security & Sensitive-Data Protection (P0 Follow-up)
+
+**Status:** Accepted - Pending Implementation
+
+**Decision:** The Private Domain API surface (and platform API generally) has no JWT auth middleware or RBAC; `account_id` travels as a raw Query param, and sensitive fields (phone, email, WeChat ID in `contact_info` JSON / `customer` / `customer_identity`) are stored and returned in plaintext. This is recorded as a P0 follow-up: add JWT auth middleware + per-account ownership checks, mask PII in API responses, encrypt sensitive fields at rest, and add audit logging.
+
+**Reason:** Privacy + Architecture reviews both returned CHANGES_REQUIRED (t_dcc56882, t_a0195813). Data leakage risk under Personal Information Protection Law (PIPL). Implementation is out of scope for the Phase 5 summary and tracked as a P0 board task.
+
+**Source:** Phase 5 Data Privacy Review (t_dcc56882) + Architecture Review (t_a0195813), 2026-09-14

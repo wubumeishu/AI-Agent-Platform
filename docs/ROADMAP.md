@@ -115,6 +115,8 @@
 
 ## Phase 5 — Private Domain
 
+> Status (2026-09-14): Implementation layer complete (10 tables, 24 API endpoints, segment rule engine, CRM integration, 8 frontend views, 84/84 integrity tests). Security P0 follow-ups (auth/RBAC + sensitive-data protection) and the NurturePlan execution engine remain open - see docs/PHASE-5-SUMMARY.md.
+
 - Private channels
 - Nurture plan
 - Content library
