@@ -8,7 +8,7 @@
       </div>
       <button
         class="sidebar__toggle"
-        @click="collapsed = !collapsed"
+        @click="$emit('toggle')"
         :aria-label="collapsed ? '展开侧边栏' : '收起侧边栏'"
       >
         {{ collapsed ? '›' : '‹' }}
@@ -43,26 +43,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
 defineProps<{
   collapsed?: boolean
 }>()
 
-const emit = defineEmits<{
+defineEmits<{
   (e: 'toggle'): void
 }>()
 
 const route = useRoute()
 
-const collapsed = ref(false)
-
 const menuItems = [
   { path: '/', label: '首页', icon: '🏠' },
   { path: '/dashboard', label: '工作台', icon: '📊' },
   { path: '/agents', label: 'Agent 管理', icon: '🤖' },
+  { path: '/personas', label: 'Persona 管理', icon: '🎭' },
   { path: '/accounts', label: '账号管理', icon: '👤' },
+  { path: '/platforms', label: '平台管理', icon: '🔌' },
+  { path: '/browsers', label: '浏览器管理', icon: '🌐' },
+  { path: '/proxies', label: '代理管理', icon: '🔀' },
   { path: '/settings', label: '设置', icon: '⚙️' },
 ]
 
