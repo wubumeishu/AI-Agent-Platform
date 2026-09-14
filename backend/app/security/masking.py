@@ -91,12 +91,15 @@ def _mask_value(key: str, value: Any) -> Any:
             return "***"  # credentials are fully redacted, never partially
     if value is None or not isinstance(value, str):
         return value
-    if lowered in ("phone", "mobile"):
-        return mask_phone(value)
-    if lowered in ("email", "mail"):
-        return mask_email(value)
-    if lowered in ("wechat_id", "wechat", "platform_account_id", "platform_username"):
+    # Marker-based matching so plurals / suffixed keys ("phones",
+    # "email_aliases") are caught too. ``we`` must be checked before the
+    # ``mobile`` marker so "wechat_id" is not misrouted to phone masking.
+    if "wechat" in lowered:
         return mask_wechat(value)
+    if "mobile" in lowered or "phone" in lowered:
+        return mask_phone(value)
+    if "email" in lowered or lowered.startswith("mail"):
+        return mask_email(value)
     return value
 
 
@@ -104,24 +107,28 @@ def mask_dict(payload: Any) -> Any:
     """Return a copy of ``payload`` with all PII/secret keys masked.
 
     Recurses through nested dicts *and* lists so a ``{"items": [{"phone":
-    ...}], "contact_info": {"phone": ...}, "identities": [{"wechat_id": ...}]}``
-    response is fully scrubbed at every level. Plain non-PII values pass
-    through unchanged, so the response stays shape-compatible with existing
-    clients. Scalars that are PII-keyed are masked; list items are masked
-    recursively (so lists of PII dicts / lists of raw phone strings under a
-    PII key are both handled).
+    ...}], "contact_info": {"phone": ...}, "phones": ["138...", ...]}``
+    response is fully scrubbed at every level. A list whose items are dicts
+    is recursed (so a PII dict inside the list is masked); a list whose items
+    are scalars is masked *by the owning key* (so a ``"phones"`` list of raw
+    numbers is masked). Plain non-PII values pass through unchanged, keeping
+    the response shape-compatible with existing clients.
     """
     if isinstance(payload, dict):
         out: Dict[str, Any] = {}
         for key, value in payload.items():
-            out[key] = mask_dict(value) if isinstance(value, (dict, list)) else _mask_value(key, value)
-            # A list-of-dicts / list-of-scalars under any key is masked too
-            # (covers "items" arrays and "contact_info" that is a list).
-            if isinstance(value, list):
-                out[key] = [mask_dict(v) for v in value]
+            if isinstance(value, dict):
+                out[key] = mask_dict(value)
+            elif isinstance(value, list):
+                out[key] = [
+                    mask_dict(item) if isinstance(item, (dict, list)) else _mask_value(key, item)
+                    for item in value
+                ]
+            else:
+                out[key] = _mask_value(key, value)
         return out
     if isinstance(payload, list):
-        return [mask_dict(v) for v in payload]
+        return [mask_dict(item) for item in payload]
     return payload
 
 

@@ -157,17 +157,14 @@ def upgrade() -> None:
             {"v": encrypt_field(value), "id": _id},
         )
 
-    # customer_identity (platform_account_id is NOT NULL)
-    for column, null_guard in (
-        ("platform_account_id", ""),
-        ("phone", "IS NOT NULL AND"),
-        ("email", "IS NOT NULL AND"),
-        ("external_id", "IS NOT NULL AND"),
-    ):
+    # customer_identity (platform_account_id is NOT NULL; the others may be
+    # NULL and are skipped when so).
+    for column in ("platform_account_id", "phone", "email", "external_id"):
+        null_guard = "" if column == "platform_account_id" else f"{column} IS NOT NULL AND "
         rows = bind.execute(
             sa.text(
                 f"SELECT id, {column} FROM customer_identity "
-                f"WHERE {column} {null_guard} {column} NOT LIKE 'A1$%'"
+                f"WHERE {null_guard}{column} NOT LIKE 'A1$%'"
             )
         ).fetchall()
         for _id, value in rows:

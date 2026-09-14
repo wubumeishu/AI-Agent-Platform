@@ -21,8 +21,13 @@ class PrivateChannelBase(BaseModel):
 
 
 class PrivateChannelCreate(PrivateChannelBase):
-    """Schema for creating a private channel"""
-    account_id: UUID
+    """Schema for creating a private channel.
+
+    P0-1: ``account_id`` is optional in the body — the authenticated router
+    binds the owning account from the JWT principal, so a client-supplied
+    value is never trusted.
+    """
+    account_id: Optional[UUID] = None
     pass
 
 
@@ -81,7 +86,7 @@ class NurturePlanBase(BaseModel):
 class NurturePlanCreate(NurturePlanBase):
     """Schema for creating a nurture plan"""
     channel_id: UUID
-    account_id: UUID
+    account_id: Optional[UUID] = None  # P0-1: bound from the JWT principal
 
 
 class NurturePlanUpdate(BaseModel):
@@ -135,7 +140,7 @@ class ContentItemBase(BaseModel):
 
 class ContentItemCreate(ContentItemBase):
     """Schema for creating a content item"""
-    account_id: UUID
+    account_id: Optional[UUID] = None  # P0-1: bound from the JWT principal
     channel_id: Optional[UUID] = None
     pass
 
@@ -242,7 +247,7 @@ class FollowUpTaskBase(BaseModel):
 
 class FollowUpTaskCreate(FollowUpTaskBase):
     """Schema for creating a follow-up task"""
-    account_id: UUID
+    account_id: Optional[UUID] = None  # P0-1: bound from the JWT principal
     customer_id: Optional[UUID] = None
     lead_id: Optional[UUID] = None
     assigned_to: Optional[str] = None
@@ -299,7 +304,7 @@ class CustomerSegmentBase(BaseModel):
 
 class CustomerSegmentCreate(CustomerSegmentBase):
     """Schema for creating a customer segment"""
-    account_id: UUID
+    account_id: Optional[UUID] = None  # P0-1: bound from the JWT principal
     pass
 
 
@@ -343,7 +348,7 @@ class DealPipelineBase(BaseModel):
 
 class DealPipelineCreate(DealPipelineBase):
     """Schema for creating a deal pipeline"""
-    account_id: UUID
+    account_id: Optional[UUID] = None  # P0-1: bound from the JWT principal
     stages: Optional[List[dict]] = None
     pass
 
@@ -434,7 +439,7 @@ class DealItemBase(BaseModel):
 class DealItemCreate(DealItemBase):
     """Schema for creating a deal item"""
     pipeline_id: UUID
-    account_id: UUID
+    account_id: Optional[UUID] = None  # P0-1: bound from the JWT principal
     stage_id: Optional[UUID] = None
     customer_id: Optional[UUID] = None
     lead_id: Optional[UUID] = None

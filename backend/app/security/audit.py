@@ -60,6 +60,15 @@ async def record_audit(
         )
         db.add(log)
         await db.flush()  # persist within the caller's transaction (rolls back with it)
+        # The service layer owns its own commit for the business write, so after
+        # that commit the audit row is the only pending work. Commit it when we
+        # are in a transaction, otherwise it would be lost when the request's
+        # session closes (the audit must not silently disappear).
+        try:
+            if getattr(db, "in_transaction", lambda: False)():
+                await db.commit()
+        except Exception:  # noqa: BLE001 - commit already handled elsewhere
+            pass
         return log
     except Exception as exc:  # noqa: BLE001 - audit must not break the op
         logger.error(

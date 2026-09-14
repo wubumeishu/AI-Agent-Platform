@@ -771,9 +771,11 @@ async def add_segment_member_endpoint(
     principal: PrivateDomainPrincipal = principal_dep,
 ):
     try:
-        # F-5: added_by defaults to the authenticated principal so audit
-        # attribution cannot be forged; an explicit label is still allowed.
-        result = await add_segment_member(db, segment_id, customer_id, added_by, account_id=_principal_account(principal))
+        # F-5: audit attribution is bound to the authenticated principal — a
+        # free-text added_by may still override the *label*, but an absent one
+        # resolves to the caller's identity, not a forgeable default.
+        audit_added_by = added_by if added_by else principal.principal
+        result = await add_segment_member(db, segment_id, customer_id, audit_added_by, account_id=_principal_account(principal))
         await record_audit(db, account_id=_principal_account(principal), principal=principal.principal,
                            resource_type="segment_member", operation=OP_CREATE, resource_id=segment_id,
                            detail={"customer_id": str(customer_id), "added_by": added_by})
@@ -808,7 +810,8 @@ async def bulk_add_members_endpoint(
     principal: PrivateDomainPrincipal = principal_dep,
 ):
     try:
-        result = await bulk_add_members(db, segment_id, customer_ids, added_by, account_id=_principal_account(principal))
+        audit_added_by = added_by if added_by else principal.principal
+        result = await bulk_add_members(db, segment_id, customer_ids, audit_added_by, account_id=_principal_account(principal))
         await record_audit(db, account_id=_principal_account(principal), principal=principal.principal,
                            resource_type="segment_member", operation=OP_CREATE, resource_id=segment_id,
                            detail={"bulk": len(customer_ids)})
