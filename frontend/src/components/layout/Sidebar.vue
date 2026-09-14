@@ -87,6 +87,12 @@ const menuItems = [
   { path: '/workflows', label: '工作流', icon: '🧩', children: [
       { path: '/workflows', label: '工作流列表' },
     ]},
+  { path: '/analytics', label: '数据洞察', icon: '📊', children: [
+      { path: '/analytics/dashboard', label: '概览' },
+      { path: '/analytics/funnel', label: '漏斗' },
+      { path: '/analytics/metrics', label: '指标' },
+      { path: '/analytics/experiments', label: '实验' },
+    ]},
   { path: '/prompts', label: 'Prompt 模板', icon: '📝', children: [
       { path: '/prompts/templates', label: '模板列表' },
       { path: '/prompts/version-history-demo', label: '版本历史（演示）' },

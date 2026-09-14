@@ -204,6 +204,31 @@ const router = createRouter({
           name: 'workflow-detail',
           component: () => import('@/views/workflows/WorkflowDetailView.vue'),
         },
+        // Phase 6 / P6AN-10: Analytics Routes
+        {
+          path: 'analytics',
+          redirect: '/analytics/dashboard',
+        },
+        {
+          path: 'analytics/dashboard',
+          name: 'analytics-dashboard',
+          component: () => import('@/views/analytics/DashboardView.vue'),
+        },
+        {
+          path: 'analytics/funnel',
+          name: 'analytics-funnel',
+          component: () => import('@/views/analytics/FunnelView.vue'),
+        },
+        {
+          path: 'analytics/metrics',
+          name: 'analytics-metrics',
+          component: () => import('@/views/analytics/MetricsView.vue'),
+        },
+        {
+          path: 'analytics/experiments',
+          name: 'analytics-experiments',
+          component: () => import('@/views/analytics/ExperimentsView.vue'),
+        },
       ],
     },
     {
