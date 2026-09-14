@@ -38,6 +38,7 @@ from app.routers.analytics import router as analytics_router  # Phase 6 P6AN-01:
 from app.routers.private_domain_conversion import router as private_domain_conversion_router  # P6AN-06: private-domain conversion aggregation
 from app.routers.agent_performance import router as agent_performance_router  # P6AN-07: agent-efficiency KPIs / leaderboard
 from app.routers.dashboard import router as dashboard_router  # Phase 6 P6AN-02: dashboard overview aggregate
+from app.routers.roi_analysis import router as roi_analysis_router  # P6AN-09: ROI analysis (agent / campaign / private-domain)
 
 app = FastAPI(
     title="AI Agent Platform",
@@ -131,6 +132,7 @@ app.include_router(analytics_router)  # P6AN-01: self-prefixed /api/v1/analytics
 app.include_router(agent_performance_router)  # P6AN-07: self-prefixed /api/v1/analytics/agents
 app.include_router(dashboard_router)  # P6AN-02: self-prefixed /api/v1/analytics/dashboard/overview
 app.include_router(private_domain_conversion_router)  # P6AN-06: self-prefixed /api/v1/analytics/private-domain
+app.include_router(roi_analysis_router)  # P6AN-09: self-prefixed /api/v1/analytics/roi
 
 
 # Workflow-CRM integration: register the executor as a subscriber for all CRM

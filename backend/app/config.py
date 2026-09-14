@@ -192,3 +192,47 @@ def task_crash_recovery_enabled() -> bool:
     ``WORKFLOW_TASK_CRASH_RECOVERY=0`` to keep the old manual-only semantics.
     """
     return _truthy_env("WORKFLOW_TASK_CRASH_RECOVERY", "true")
+
+
+# ==========================================================================
+# P6AN-09 ROI analysis — configurable cost-proxy rates
+# ==========================================================================
+# The ROI card computes *投入* (input) as a **cost proxy** over observable
+# activity volumes (outbound messages / nurture executions / follow-up tasks /
+# active agents / campaign leads) because no finance system is wired up yet
+# (out of scope this wave). The per-unit rates are env-configurable so each
+# deployment can supply its real operating-cost figures without a code change.
+#
+# **Defaults are all ``0``** — an honest "no cost basis configured" state.
+# With every rate at 0 the total input is 0, so the ROI ratio/percent is
+# reported as ``None`` (undefined, NOT 0%) rather than fabricating a false
+# cost. Set the rates below to activate the cost proxy. Full caliber doc:
+# ``backend/docs/P6AN-09-roi-analysis-api.md``.
+
+def _cents_env(name: str, default: int = 0) -> int:
+    """Read a non-negative integer cents rate from the environment (P6AN-09).
+
+    Malformed values fall back to ``default`` (never a startup crash).
+    Negative values are clamped to ``0`` — a cost rate must never be negative.
+    """
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return default
+
+
+def roi_cost_rates() -> Dict[str, int]:
+    """The full P6AN-09 cost-proxy rate table (cents per unit, per source).
+
+    Keys are stable so the service / response / docs share one name space.
+    Returns a plain dict so a test can hand a pure-assembler its own rates
+    without touching the environment.
+    """
+    return {
+        "cost_per_outbound_message_cents": _cents_env("ROI_COST_PER_OUTBOUND_MESSAGE_CENTS", 0),
+        "cost_per_nurture_execution_cents": _cents_env("ROI_COST_PER_NURTURE_EXECUTION_CENTS", 0),
+        "cost_per_followup_task_cents": _cents_env("ROI_COST_PER_FOLLOWUP_TASK_CENTS", 0),
+        "cost_per_active_agent_cents": _cents_env("ROI_COST_PER_ACTIVE_AGENT_CENTS", 0),
+        "cost_per_campaign_lead_cents": _cents_env("ROI_COST_PER_CAMPAIGN_LEAD_CENTS", 0),
+    }
