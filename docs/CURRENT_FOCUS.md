@@ -2,48 +2,72 @@
 
 ## 当前阶段
 
-Phase 0 — Desktop Foundation
+Phase 2 — AI & Conversation
 
 ## 当前目标
 
-让 AI Agent Platform 成为一个可以正常启动、导航、保存基础配置的 Windows 桌面应用。
+实现 AI 对话核心功能，包括 Provider 配置、Prompt 管理、Agent 上下文、对话管理、Persona 生成、记忆系统。
 
 ---
 
 ## 当前只允许处理
 
-P0-001
-Tauri + Vue 3 基础骨架
+### Phase 2 任务
 
-P0-002
-应用 Layout
+**AI Provider**
+- 多模型支持（OpenAI、Anthropic、本地模型）
+- Provider 适配器接口
+- 模型配置管理
 
-P0-003
-基础路由
+**Prompt Management**
+- Prompt 模板系统
+- 变量替换
+- 版本管理
 
-P0-004
-Dashboard 空状态页面
+**Agent Context**
+- 对话上下文管理
+- 消息历史记录
+- 上下文窗口控制
 
-P0-005
-基础应用设置
+**Conversation**
+- 会话创建/管理
+- 消息发送/接收
+- 流式响应支持
+
+**Message**
+- 消息模型定义
+- 消息存储
+- 消息查询
+
+**Persona Generation**
+- Persona 风格化生成
+- 人格参数配置
+- 生成质量评估
+
+**Memory**
+- 短期记忆（会话内）
+- 长期记忆（跨会话）
+- 记忆检索
+
+**Knowledge**
+- 知识库管理
+- RAG 支持
+- 文档索引
+
+**Intent**
+- 意图识别
+- 意图分类
+- 意图执行映射
 
 ---
 
 ## 暂时禁止
 
-AI Engine
-
-BitBrowser
-
-Playwright
-
 CRM
-
 Workflow
-
 Private Domain
-
 Analytics
+Future Features
 
 除非当前任务明确要求。
 
@@ -53,32 +77,30 @@ Analytics
 
 用户能够：
 
-1. 打开 Windows 应用
-2. 看见主界面
-3. 点击左侧菜单
-4. 页面能够正确切换
-5. 软件可以正常关闭
-6. 重新启动后应用仍然正常
-7. 无明显运行错误
+1. 配置 AI Provider
+2. 选择模型
+3. 创建对话
+4. 发送消息
+5. 查看回复
+6. 管理 Persona
+7. 使用记忆系统
 
 ---
 
 ## 当前开发原则
 
-先做页面和基础骨架。
-
-不要提前实现后续业务逻辑。
-
-不要为了“未来扩展”一次性创建大量代码。
-
-完成后必须实际运行软件。
+1. 先实现核心功能，再优化体验
+2. Provider 抽象必须清晰
+3. 支持多模型切换
+4. 记忆系统要可观测
+5. 完成后必须实际测试
 
 ---
 
 ## 当前唯一目标
 
-让用户第一次打开软件时：
+让用户能够：
 
-> “这是一个真正的软件，而且结构已经清楚。”
+> "配置 AI，开启对话，获得智能回复"
 
 其他事情全部排队。
