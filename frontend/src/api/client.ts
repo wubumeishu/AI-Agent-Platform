@@ -38,17 +38,33 @@ apiClient.interceptors.request.use(
 // 响应拦截器
 apiClient.interceptors.response.use(
   (response: any) => {
-    const { code, message, data } = response.data
-    
-    if (code === 0) {
-      return data
+    const body = response.data
+
+    // 部分路由（CRM 等）返回 {code, message, data} 信封；
+    // FastAPI 原生路由（workflows / agents / execution-logs 等）直接返回裸模型。
+    // 两者都要兼容：识别出信封才走信封解包，否则原样透传。
+    const isEnvelope =
+      body !== null &&
+      typeof body === 'object' &&
+      !Array.isArray(body) &&
+      'code' in body &&
+      ('message' in body || 'data' in body)
+
+    if (isEnvelope) {
+      const { code, message, data } = body
+      if (code === 0) {
+        response.data = data
+        return response
+      }
+      // 业务错误
+      const error: any = new Error(message || '请求失败')
+      error.code = code
+      error.isBusinessError = true
+      return Promise.reject(error)
     }
-    
-    // 业务错误
-    const error: any = new Error(message || '请求失败')
-    error.code = code
-    error.isBusinessError = true
-    return Promise.reject(error)
+
+    // 裸模型 / 204 等：保持原样
+    return response
   },
   (error: any) => {
     const status = error.response?.status
