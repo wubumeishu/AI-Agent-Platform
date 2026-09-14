@@ -229,6 +229,27 @@ const router = createRouter({
           name: 'analytics-experiments',
           component: () => import('@/views/analytics/ExperimentsView.vue'),
         },
+        // Phase 6 / P6AN-12: Agent 效能排行榜 + 单 Agent 效能详情
+        {
+          path: 'analytics/agents/performance',
+          name: 'analytics-agent-performance',
+          component: () =>
+            import('@/views/analytics/AgentPerformanceView.vue'),
+        },
+        // Phase 6 / P6AN-12: 单 Agent 效能详情（静态 performance 路由优先于动态 :agentId）
+        {
+          path: 'analytics/agents/:agentId',
+          name: 'analytics-agent-performance-detail',
+          component: () =>
+            import('@/views/analytics/AgentPerformanceDetailView.vue'),
+        },
+        // Phase 6 / P6AN-12: 实验详情
+        {
+          path: 'analytics/experiments/:experimentId',
+          name: 'analytics-experiment-detail',
+          component: () =>
+            import('@/views/analytics/ExperimentDetailView.vue'),
+        },
       ],
     },
     {

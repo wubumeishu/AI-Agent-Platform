@@ -91,6 +91,7 @@ const menuItems = [
       { path: '/analytics/dashboard', label: '概览' },
       { path: '/analytics/funnel', label: '漏斗' },
       { path: '/analytics/metrics', label: '指标' },
+      { path: '/analytics/agents/performance', label: 'Agent 效能' },
       { path: '/analytics/experiments', label: '实验' },
     ]},
   { path: '/prompts', label: 'Prompt 模板', icon: '📝', children: [

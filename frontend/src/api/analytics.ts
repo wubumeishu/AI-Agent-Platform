@@ -8,6 +8,7 @@ import type {
   LeadConversionResponse,
   AgentPerformanceParams,
   AgentPerformanceLeaderboardResponse,
+  AgentPerformanceSingleResponse,
   PDCParams,
   PDCResponse,
   ConversationMetricsParams,
@@ -15,7 +16,14 @@ import type {
   MetricDefinition,
   MetricDefinitionListParams,
   MetricDefinitionListResponse,
+  Experiment,
+  ExperimentCreate,
+  ExperimentUpdate,
+  ExperimentStatusUpdate,
   ExperimentListResponse,
+  ExperimentResult,
+  ExperimentResultCreate,
+  ExperimentResultListResponse,
   ExperimentResultSummaryResponse,
 } from './analytics-types'
 
@@ -100,12 +108,23 @@ export const analyticsLeadConversionApi = {
 
 // ---- P6AN-07 Agent 效能 ----
 export const analyticsAgentPerformanceApi = {
-  /** GET /analytics/agents/performance — Agent 效能排行榜 */
+  /** GET /analytics/agents/performance — Agent 效能排行榜（可排序 + 时间范围） */
   leaderboard(
     params?: AgentPerformanceParams
   ): Promise<AgentPerformanceLeaderboardResponse> {
     return api.get<AgentPerformanceLeaderboardResponse>(
       '/analytics/agents/performance',
+      { params }
+    )
+  },
+
+  /**
+   * GET /analytics/agents/performance/metrics/{agent_id} — 单 Agent KPI 块。
+   * 404 = Agent 不存在/已删除；无数据返回零值 KPI 块（不是错误）。
+   */
+  single(agentId: string, params?: AgentPerformanceParams): Promise<AgentPerformanceSingleResponse> {
+    return api.get<AgentPerformanceSingleResponse>(
+      `/analytics/agents/performance/metrics/${agentId}`,
       { params }
     )
   },
@@ -134,12 +153,81 @@ export const analyticsExperimentApi = {
     })
   },
 
-  /** GET /analytics/experiments/{id}/results/summary — 变组对比摘要 */
+  /** GET /analytics/experiments/{id} — 单个实验详情 */
+  detail(experimentId: string): Promise<Experiment> {
+    return api.get<Experiment>(`/analytics/experiments/${experimentId}`)
+  },
+
+  /** POST /analytics/experiments — 创建（固定 draft；流量份额违例 409） */
+  create(data: ExperimentCreate): Promise<Experiment> {
+    return api.post<Experiment>('/analytics/experiments', data)
+  },
+
+  /** PUT /analytics/experiments/{id} — 更新可变字段（variants 变更重新校验份额，违例 409） */
+  update(experimentId: string, data: ExperimentUpdate): Promise<Experiment> {
+    return api.put<Experiment>(
+      `/analytics/experiments/${experimentId}`,
+      data
+    )
+  },
+
+  /**
+   * POST /analytics/experiments/{id}/status — 状态机驱动。
+   * 非法转换 409；terminated 必须带非空 reason（否则 409）。
+   */
+  setStatus(
+    experimentId: string,
+    data: ExperimentStatusUpdate
+  ): Promise<Experiment> {
+    return api.post<Experiment>(
+      `/analytics/experiments/${experimentId}/status`,
+      data
+    )
+  },
+
+  /** DELETE /analytics/experiments/{id} — 软删除（204，无响应体） */
+  remove(experimentId: string): Promise<void> {
+    return api.delete<void>(`/analytics/experiments/${experimentId}`)
+  },
+
+  /** GET /analytics/experiments/{id}/results — 结果快照列表 */
+  results(
+    experimentId: string,
+    params?: {
+      variant_label?: string
+      metric_code?: string
+      page?: number
+      page_size?: number
+    }
+  ): Promise<ExperimentResultListResponse> {
+    return api.get<ExperimentResultListResponse>(
+      `/analytics/experiments/${experimentId}/results`,
+      { params }
+    )
+  },
+
+  /** POST /analytics/experiments/{id}/results — 记录一条结果快照 */
+  createResult(
+    experimentId: string,
+    data: ExperimentResultCreate
+  ): Promise<ExperimentResult> {
+    return api.post<ExperimentResult>(
+      `/analytics/experiments/${experimentId}/results`,
+      data
+    )
+  },
+
+  /**
+   * GET /analytics/experiments/{id}/results/summary — 变组对比摘要（P6AN-08）。
+   * significance_threshold：p 值判注阈值（默认 0.05，仅判注，不做推断）。
+   */
   resultSummary(
-    experimentId: string
+    experimentId: string,
+    params?: { significance_threshold?: number }
   ): Promise<ExperimentResultSummaryResponse> {
     return api.get<ExperimentResultSummaryResponse>(
-      `/analytics/experiments/${experimentId}/results/summary`
+      `/analytics/experiments/${experimentId}/results/summary`,
+      { params }
     )
   },
 }
@@ -153,6 +241,7 @@ export type {
   LeadConversionResponse,
   AgentPerformanceParams,
   AgentPerformanceLeaderboardResponse,
+  AgentPerformanceSingleResponse,
   PDCParams,
   PDCResponse,
   ConversationMetricsParams,
@@ -160,6 +249,13 @@ export type {
   MetricDefinition,
   MetricDefinitionListParams,
   MetricDefinitionListResponse,
+  Experiment,
+  ExperimentCreate,
+  ExperimentUpdate,
+  ExperimentStatusUpdate,
   ExperimentListResponse,
+  ExperimentResult,
+  ExperimentResultCreate,
+  ExperimentResultListResponse,
   ExperimentResultSummaryResponse,
 } from './analytics-types'

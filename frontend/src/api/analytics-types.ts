@@ -219,6 +219,18 @@ export interface AgentPerformanceParams {
   page_size?: number
 }
 
+/**
+ * P6AN-07 单 Agent KPI 块：
+ * GET /analytics/agents/performance/metrics/{agent_id}
+ * 返回 { metrics, window } 信封（与排行榜的裸 KPI 块不同）。
+ * Agent 不存在 → 404；无数据 → 零值 KPI 块（不是错误）。
+ */
+export interface AgentPerformanceSingleResponse {
+  metrics: AgentPerformanceMetrics
+  /** 实际应用的窗口（ISO-8601 since/until，或 all-time 预设标记） */
+  window: Record<string, string | null>
+}
+
 // ===== P6AN-06 私域转化 =====
 
 export interface PDCWindow {
@@ -397,6 +409,7 @@ export interface MetricDefinitionListParams {
 
 export interface ExperimentVariant {
   label: string
+  /** 0-1 流量份额；P6AN-08 起带份额时全部 variants 份额之和必须 = 1.0（±1e-6），违例 409 */
   share?: number
   config?: Record<string, unknown>
 }
@@ -410,7 +423,9 @@ export interface Experiment {
   /** 后端 primary_metric_code 可空（旧实验未填主指标） */
   primary_metric_code?: string | null
   secondary_metric_codes?: string[]
+  /** 原始 variants dict 列表（{label, share?, config?}，share 可缺省） */
   variants: ExperimentVariant[]
+  /** draft | running | paused | completed | terminated */
   status: string
   owner?: string | null
   started_at?: string | null
@@ -420,6 +435,44 @@ export interface Experiment {
   updated_at: string
 }
 
+/** POST /experiments（创建固定 draft 状态） */
+export interface ExperimentCreate {
+  /** ^[a-z0-9_-]+$，1-100 字符 */
+  code: string
+  name: string
+  description?: string
+  hypothesis?: string
+  /** 注册指标 code */
+  primary_metric_code?: string | null
+  secondary_metric_codes?: string[]
+  /** 变组配置，如 [{label:'control',share:0.5,config:{}}] */
+  variants?: ExperimentVariant[]
+  owner?: string
+}
+
+/** PUT /experiments/{id}（code 不可改；variants 变更时重新校验流量分配，违例 409） */
+export interface ExperimentUpdate {
+  name?: string
+  description?: string
+  hypothesis?: string
+  primary_metric_code?: string | null
+  secondary_metric_codes?: string[]
+  variants?: ExperimentVariant[]
+  owner?: string
+}
+
+/**
+ * POST /experiments/{id}/status — 状态机（后端按 EXPERIMENT_TRANSITIONS 校验）：
+ * draft → running / terminated；running → paused / completed / terminated；
+ * paused → running / terminated；completed / terminated 为终态。
+ * 非法转换 → 409；terminated 必须带非空 reason。
+ */
+export interface ExperimentStatusUpdate {
+  status: string
+  /** 终止原因（status='terminated' 时必填） */
+  reason?: string
+}
+
 export interface ExperimentListResponse {
   items: Experiment[]
   total: number
@@ -427,14 +480,70 @@ export interface ExperimentListResponse {
   page_size: number
 }
 
+// ---- P6AN-08 实验结果快照 ----
+
+export interface ExperimentResult {
+  id: string
+  experiment_id: string
+  variant_label: string
+  metric_code: string
+  sample_size: number
+  /** 后端 Decimal 序列化为字符串 */
+  metric_value: string
+  baseline_value?: string | null
+  lift_percent?: string | null
+  p_value?: string | null
+  is_significant?: boolean | null
+  stats?: Record<string, unknown>
+  computed_at: string
+}
+
+export interface ExperimentResultCreate {
+  variant_label: string
+  metric_code: string
+  sample_size?: number
+  /** 数字或数字字符串（后端 Decimal，最多 6 位小数） */
+  metric_value: number | string
+  baseline_value?: number | string | null
+  /** 相对基线提升百分比（0-100 小数形式如 12.5 = 12.5%） */
+  lift_percent?: number | string | null
+  /** 0-1 */
+  p_value?: number | string | null
+  is_significant?: boolean | null
+  stats?: Record<string, unknown>
+  computed_at?: string
+}
+
+export interface ExperimentResultListResponse {
+  items: ExperimentResult[]
+  total: number
+  page: number
+  page_size: number
+}
+
+// ---- P6AN-08 结果对比摘要（GET /experiments/{id}/results/summary） ----
+
+/** 一个变组在某指标下的最新快照行（数值为 Decimal 字符串） */
+export interface ExperimentResultSummaryRow {
+  variant_label: string
+  metric_value: string
+  sample_size: number
+  baseline_value?: string | null
+  computed_at: string
+  /** 相对基线变组的提升百分比；基线缺失或为 0 时为 null */
+  lift_vs_baseline_percent?: string | null
+  p_value?: string | null
+  is_significant?: boolean | null
+}
+
 export interface ExperimentResultSummaryMetric {
   metric_code: string
-  metric_label?: string
-  /** 各分组最新快照值 */
-  values: Record<string, number | null>
-  /** 相对基线变组的 lift（基线为 0 时无该组 lift） */
-  lifts: Record<string, number | null>
-  p_value?: number | null
+  /** 是否为实验主指标 */
+  is_primary: boolean
+  baseline_variant?: string | null
+  /** 纯文字显著性/对比说明（本波不引入统计推断库） */
+  note?: string
+  variants: ExperimentResultSummaryRow[]
 }
 
 export interface ExperimentResultSummaryResponse {
@@ -442,6 +551,7 @@ export interface ExperimentResultSummaryResponse {
   code: string
   name: string
   status: string
+  /** 基线变组 label：优先 'control'，否则第一个变组；无变组为 null */
   baseline_variant: string | null
   significance_threshold: number
   metrics: ExperimentResultSummaryMetric[]
