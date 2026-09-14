@@ -10,11 +10,12 @@ from app.crm.routers.customer_360 import router as customer_360_router
 from app.crm.routers.customer_messages import router as customer_messages_router  # P5MSG-05
 from app.crm.routers.customer import router as customer_router
 from app.routers.accounts import router as accounts_router
+from app.routers.auth import router as auth_router  # P0-1 / ADR-011: JWT token mint endpoint
 from app.routers.personas import router as personas_router
 from app.routers.private_domain import router as private_domain_router
 from app.routers.browsers import router as browsers_router
 from app.routers.prompt_templates import router as prompt_templates_router
-# P1-003 shelved: from app.routers.conversations import router as conversations_router
+from app.routers.conversations import router as conversations_router  # P1-003 restored (ADR-016); was shelved in main.py without a recorded decision
 from app.crm.routers.tag import router as tag_router
 from app.routers.agents import router as agents_router
 from app.routers.intents import router as intents_router
@@ -33,6 +34,10 @@ from app.routers.nurture_execution import router as nurture_execution_router
 from app.routers.realtime import router as realtime_router
 from app.routers.messages import router as messages_router  # P5MSG-01 skeleton; P5MSG-02 builds the API on it
 from app.routers.channels import router as channels_router  # P5MSG-01 channel-config skeleton (P5MSG-03 implements)
+from app.routers.analytics import router as analytics_router  # Phase 6 P6AN-01: analytics foundation CRUD
+from app.routers.private_domain_conversion import router as private_domain_conversion_router  # P6AN-06: private-domain conversion aggregation
+from app.routers.agent_performance import router as agent_performance_router  # P6AN-07: agent-efficiency KPIs / leaderboard
+from app.routers.dashboard import router as dashboard_router  # Phase 6 P6AN-02: dashboard overview aggregate
 
 app = FastAPI(
     title="AI Agent Platform",
@@ -49,6 +54,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# P0-1 / ADR-011: a resource the caller does not own (per-account ownership
+# enforced in the service layer) is a 403, never a 404, so the API does not
+# leak which accounts exist. Mapped globally so every router that raises
+# AccountOwnershipError reports the same cross-account-authorization shape.
+from app.security.jwt_auth import AccountOwnershipError  # noqa: E402
+
+
+@app.exception_handler(AccountOwnershipError)
+async def _account_ownership_handler(request, exc: AccountOwnershipError):
+    from fastapi.responses import JSONResponse
+
+    import logging
+
+    logging.getLogger(__name__).warning(
+        "cross-account private-domain access denied: %s (%s)",
+        exc,
+        getattr(exc, "resource_type", "resource"),
+    )
+    return JSONResponse(
+        status_code=403,
+        content={
+            "code": 403,
+            "message": "resource does not belong to the caller's account",
+            "data": None,
+        },
+    )
+
+
 # Include routers
 app.include_router(crm_router, prefix="/api/v1")
 app.include_router(customer_360_router, prefix="/api/v1/customers")
@@ -56,11 +90,12 @@ app.include_router(customer_360_router, prefix="/api/v1/customers")
 app.include_router(customer_messages_router, prefix="/api/v1/customers")
 app.include_router(customer_router, prefix="/api/v1")
 app.include_router(accounts_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")  # P0-1 / ADR-011
 app.include_router(personas_router, prefix="/api/v1")
 app.include_router(private_domain_router, prefix="/api/v1")
 app.include_router(browsers_router, prefix="/api/v1")
 app.include_router(prompt_templates_router, prefix="/api/v1")
-# P1-003 shelved: app.include_router(conversations_router, prefix="/api/v1")
+app.include_router(conversations_router, prefix="/api/v1")  # P1-003 restored (ADR-016); P5MSG-08 DEFECT-2
 app.include_router(tag_router, prefix="/api/v1")
 # The AI-tier routers below self-carry their full `/api/v1/...` prefix on the
 # APIRouter (agents/intents/memory/decision), so they are mounted BARE here —
@@ -92,6 +127,10 @@ app.include_router(channels_router, prefix="/api/v1")  # P5MSG-01: channel-confi
 # read endpoints (active list / preview / unread). Router self-carries /realtime;
 # the /api/v1 outer prefix yields /api/v1/realtime.
 app.include_router(realtime_router, prefix="/api/v1")
+app.include_router(analytics_router)  # P6AN-01: self-prefixed /api/v1/analytics
+app.include_router(agent_performance_router)  # P6AN-07: self-prefixed /api/v1/analytics/agents
+app.include_router(dashboard_router)  # P6AN-02: self-prefixed /api/v1/analytics/dashboard/overview
+app.include_router(private_domain_conversion_router)  # P6AN-06: self-prefixed /api/v1/analytics/private-domain
 
 
 # Workflow-CRM integration: register the executor as a subscriber for all CRM
@@ -271,8 +310,108 @@ async def startup():
                 "Scheduler auto-start: load_schedules failed (DB down?); "
                 "engine will retry on the first tick"
             )
+        # P2-R4 (reliability review): a failed/dropped fire leaves a schedule
+        # enabled but with next_run_at missing; load_schedules only arms rows
+        # that already have a next fire, so restarts would keep it silently
+        # stalled. Repair + explicitly warn so the schedule self-heals.
+        try:
+            repaired = await engine_obj.repair_stalled_schedules()
+            if repaired:
+                log.warning(
+                    "Scheduler engine repaired %s stalled schedule(s) "
+                    "(enabled but missing next_run_at; re-armed at boot)",
+                    repaired,
+                )
+        except Exception:
+            log.exception("Scheduler boot: stalled-schedule repair failed")
+        # P2-R7 (reliability review): a fire that crashed between its running
+        # and terminal commits leaves a stale running ExecutionLog. Close it
+        # out (at-least-once refire is intended; the trace must still be
+        # complete and the refire observable, not a silent duplicate).
+        try:
+            finalized = await engine_obj.finalize_stale_execution_logs()
+            if finalized:
+                log.warning(
+                    "Scheduler boot finalized %s stale running ExecutionLog(s) "
+                    "(no terminal commit; crash-recovery)",
+                    finalized,
+                )
+        except Exception:
+            log.exception("Scheduler boot: stale-log finalize failed")
     else:
         log.info("Scheduler engine auto-start disabled (SCHEDULER_AUTOSTART=0)")
+
+    # P1-R2 (reliability review): crash-recovery of running WorkflowTasks.
+    # A process crash between claim_next and the terminal commit leaves the
+    # task stuck in `running` forever (recovery used to require a manual
+    # POST /workflow-tasks/sweep-timeouts, and defaults timed/retried
+    # nothing). At boot we reset every running task to pending so the
+    # consumer / next claim re-executes it. Gated by WORKFLOW_TASK_CRASH_RECOVERY
+    # (on by default).
+    if config.task_crash_recovery_enabled():
+        try:
+            from app.db.session import AsyncSessionLocal
+            from app.services.workflow_task import QueueWorkerEngine
+
+            db = AsyncSessionLocal()
+            async with db:
+                engine_tasks = QueueWorkerEngine(db)
+                recovered = await engine_tasks.recover_stale_running()
+                if recovered:
+                    log.warning(
+                        "Crash recovery: reset %s stuck running workflow task(s) "
+                        "back to pending",
+                        recovered,
+                    )
+                else:
+                    log.info("Crash recovery: no stuck running workflow tasks")
+        except Exception:
+            log.exception("Crash recovery: could not reset stuck running tasks")
+
+    # P1-R2 (reliability review): periodic auto-sweep + retry. A living
+    # process still needs the sweep to catch tasks that run past their
+    # timeout (a hung executor) — the crash path above only runs at boot.
+    # This loop runs sweep_timeouts + re-queue of retryable terminal tasks
+    # every WORKFLOW_TASK_SWEEP_INTERVAL seconds (default 30s; set 0 to
+    # keep the old manual-only semantics).
+    sweep_interval = config.task_sweep_interval_seconds()
+    if sweep_interval > 0:
+        from app.services.scheduler import task_recovery
+
+        task_recovery.get_task_recovery_loop()  # process-wide singleton
+        await task_recovery.get_task_recovery_loop().start(
+            interval_seconds=sweep_interval
+        )
+        log.info(
+            "Workflow task auto-sweep loop started (every %.1fs)", sweep_interval
+        )
+    else:
+        log.info(
+            "Workflow task auto-sweep disabled (WORKFLOW_TASK_SWEEP_INTERVAL=0)"
+        )
+
+    # P1-R1 (reliability review): opt-in in-process consumer that closes the
+    # loop fire -> claim -> execute on the scheduler queue. Default OFF so
+    # deployments that run a dedicated external worker on the same queue do
+    # not double-execute tasks; set SCHEDULER_WORKER=1 to enable.
+    if config.scheduler_worker_enabled():
+        from app.services.scheduler.consumer import SchedulerConsumer
+
+        _worker = SchedulerConsumer(
+            poll_seconds=config.scheduler_worker_poll_seconds(),
+        )
+        await _worker.start()
+        # Park it on the app state so shutdown can stop it cleanly.
+        app.state.scheduler_consumer = _worker
+        log.info(
+            "In-process scheduler consumer started (SCHEDULER_WORKER=1)"
+        )
+    else:
+        log.info(
+            "In-process scheduler consumer disabled (SCHEDULER_WORKER=0; "
+            "scheduler fires enqueue tasks but an external worker is expected "
+            "to consume them — or set SCHEDULER_WORKER=1 to run the closed loop)"
+        )
 
     # NurturePlan execution engine (t_a2ce2cae / ADR-010): the background
     # tick loop is OPT-IN. It is not auto-started so deployments that only
@@ -301,6 +440,13 @@ async def shutdown():
     """
     from app.services.scheduler.engine import get_scheduler_engine
     await get_scheduler_engine().close()
+    # Stop the periodic task-recovery sweep loop (P1-R2), no-op if never started.
+    from app.services.scheduler.task_recovery import get_task_recovery_loop
+    await get_task_recovery_loop().close()
+    # Stop the in-process scheduler consumer (P1-R1), no-op if SCHEDULER_WORKER=0.
+    consumer = getattr(app.state, "scheduler_consumer", None)
+    if consumer is not None:
+        await consumer.close()
     # Stop the nurture tick loop (no-op if it was never started).
     from app.routers.nurture_execution import _get_engine_loop
     await _get_engine_loop().stop()

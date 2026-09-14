@@ -73,11 +73,26 @@ from .workflow_task import (
     NON_TERMINAL_STATES,
 )
 from .decision import DecisionLog
+from .audit_log import AuditLog
 from .content_generation import ContentGeneration
 from .nurture_execution import (
     NurtureStepExecution,
     NURTURE_EXEC_STATES,
     NURTURE_CONTENT_STRATEGIES,
+)
+from .analytics import (
+    DashboardWidget,
+    FunnelStep,
+    MetricDefinition,
+    Experiment,
+    ExperimentResult,
+    WIDGET_TYPES,
+    METRIC_CATEGORIES,
+    METRIC_VALUE_TYPES,
+    METRIC_AGGREGATIONS,
+    EXPERIMENT_STATUSES,
+    EXPERIMENT_TRANSITIONS,
+    EXPERIMENT_TERMINAL_STATUSES,
 )
 
 __all__ = [
@@ -126,10 +141,23 @@ __all__ = [
     "ContextWindow",
     "ActivityLog",
     "DecisionLog",
+    "AuditLog",
     "ContentGeneration",
     "NurtureStepExecution",
     "NURTURE_EXEC_STATES",
     "NURTURE_CONTENT_STRATEGIES",
+    "DashboardWidget",
+    "FunnelStep",
+    "MetricDefinition",
+    "Experiment",
+    "ExperimentResult",
+    "WIDGET_TYPES",
+    "METRIC_CATEGORIES",
+    "METRIC_VALUE_TYPES",
+    "METRIC_AGGREGATIONS",
+    "EXPERIMENT_STATUSES",
+    "EXPERIMENT_TRANSITIONS",
+    "EXPERIMENT_TERMINAL_STATUSES",
     "ExecutionLog",
     "WORKFLOW_TYPES",
     "WORKFLOW_STATUSES",
