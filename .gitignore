@@ -40,3 +40,13 @@ Thumbs.db
 # Tauri
 src-tauri/gen/
 src-tauri/capabilities/
+
+# agent scratch (never commit)
+backend/_[^_]*
+backend/**/_[^_]*.py
+backend/**/_[^_]*.json
+backend/alembic_qa.ini
+backend/alembic_scratch2.ini
+backend/qa_*.py
+backend/live_check.py
+frontend/dist-e2e/
