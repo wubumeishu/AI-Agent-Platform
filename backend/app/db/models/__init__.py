@@ -74,6 +74,11 @@ from .workflow_task import (
 )
 from .decision import DecisionLog
 from .content_generation import ContentGeneration
+from .nurture_execution import (
+    NurtureStepExecution,
+    NURTURE_EXEC_STATES,
+    NURTURE_CONTENT_STRATEGIES,
+)
 
 __all__ = [
     "Base",
@@ -122,6 +127,9 @@ __all__ = [
     "ActivityLog",
     "DecisionLog",
     "ContentGeneration",
+    "NurtureStepExecution",
+    "NURTURE_EXEC_STATES",
+    "NURTURE_CONTENT_STRATEGIES",
     "ExecutionLog",
     "WORKFLOW_TYPES",
     "WORKFLOW_STATUSES",

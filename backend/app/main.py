@@ -14,7 +14,7 @@ from app.routers.personas import router as personas_router
 from app.routers.private_domain import router as private_domain_router
 from app.routers.browsers import router as browsers_router
 from app.routers.prompt_templates import router as prompt_templates_router
-from app.routers.conversations import router as conversations_router
+# P1-003 shelved: from app.routers.conversations import router as conversations_router
 from app.crm.routers.tag import router as tag_router
 from app.routers.agents import router as agents_router
 from app.routers.intents import router as intents_router
@@ -29,6 +29,7 @@ from app.routers.platforms import router as platforms_router
 from app.routers.proxies import router as proxies_router
 from app.routers.workflow_crm import router as workflow_crm_router
 from app.routers.content_generation import router as content_generation_router
+from app.routers.nurture_execution import router as nurture_execution_router
 from app.routers.realtime import router as realtime_router
 from app.routers.messages import router as messages_router  # P5MSG-01 skeleton; P5MSG-02 builds the API on it
 from app.routers.channels import router as channels_router  # P5MSG-01 channel-config skeleton (P5MSG-03 implements)
@@ -59,7 +60,7 @@ app.include_router(personas_router, prefix="/api/v1")
 app.include_router(private_domain_router, prefix="/api/v1")
 app.include_router(browsers_router, prefix="/api/v1")
 app.include_router(prompt_templates_router, prefix="/api/v1")
-app.include_router(conversations_router, prefix="/api/v1")
+# P1-003 shelved: app.include_router(conversations_router, prefix="/api/v1")
 app.include_router(tag_router, prefix="/api/v1")
 # The AI-tier routers below self-carry their full `/api/v1/...` prefix on the
 # APIRouter (agents/intents/memory/decision), so they are mounted BARE here —
@@ -72,6 +73,11 @@ app.include_router(intents_router)
 app.include_router(memory_router)
 app.include_router(decision_router)
 app.include_router(content_generation_router)
+# The nurture-execution router SELF-CARRIES its full prefix
+# (``/api/v1/nurture/executions``), so it is mounted BARE here - adding another
+# ``/api/v1`` would produce the /api/v1/api/v1 double-prefix defect (the same
+# class as the P1-2 CRM bug). Same convention as the AI-tier routers above.
+app.include_router(nurture_execution_router)
 app.include_router(workflow_execution_log_router, prefix="/api/v1")
 app.include_router(workflow_config_router, prefix="/api/v1")
 app.include_router(workflow_framework_router, prefix="/api/v1")
@@ -178,6 +184,7 @@ async def startup():
 
     # Fast DB reachability check (bounded; never blocks boot indefinitely).
     import logging
+    from app import config
     from app.config import db_required_on_startup
     from app.db.session import db_ping, redact_dsn, DATABASE_URL
 
@@ -238,16 +245,65 @@ async def startup():
     )
     register_intent_conversation_lander()
 
+    # P1-2 (architecture review, t_c94bba06): auto-start the scheduler engine
+    # and re-arm persisted schedules at boot, so a restarted process honours
+    # the engine's "restarts pick up persisted schedules" contract instead of
+    # silently leaving timed workflows stopped. Gated by SCHEDULER_AUTOSTART
+    # (on by default; set =0 to keep the old explicit-start semantics when
+    # timed execution is intentionally disabled in a deployment). The real
+    # QueueDispatcher (set by get_scheduler_engine) enqueues each fire as a
+    # WorkflowTask so time-triggered workflows actually execute.
+    if config.scheduler_autostart():
+        from app.services.scheduler.engine import get_scheduler_engine
+
+        engine_obj = get_scheduler_engine()
+        await engine_obj.start()
+        try:
+            armed = await engine_obj.load_schedules()
+            log.info(
+                "Scheduler engine auto-started; %s persisted schedule(s) armed",
+                armed,
+            )
+        except Exception:
+            # A down DB at boot must not take the HTTP layer down (see the
+            # DB reachability gate above); the fire loop retries per tick.
+            log.exception(
+                "Scheduler auto-start: load_schedules failed (DB down?); "
+                "engine will retry on the first tick"
+            )
+    else:
+        log.info("Scheduler engine auto-start disabled (SCHEDULER_AUTOSTART=0)")
+
+    # NurturePlan execution engine (t_a2ce2cae / ADR-010): the background
+    # tick loop is OPT-IN. It is not auto-started so deployments that only
+    # need on-demand manual triggers (POST /nurture/executions/trigger) or
+    # event-arming are unaffected. Set NURTURE_SCHEDULER_AUTOSTART=1 to
+    # launch the recurring due-detection loop at boot; it stops cleanly on
+    # shutdown below.
+    import os as _os
+    if _os.environ.get("NURTURE_SCHEDULER_AUTOSTART") == "1":
+        from app.routers.nurture_execution import _get_engine_loop
+        await _get_engine_loop().start()
+        log.info("Nurture scheduler tick loop auto-started at boot")
+
 
 @app.on_event("shutdown")
 async def shutdown():
-    """优雅停止调度引擎（t_wf_003），避免后台 task 泄漏。
+    """优雅停止调度引擎（t_wf_003）与 Nurture 执行循环（t_a2ce2cae），避免后台 task 泄漏。
 
-    引擎默认不自动启动：由 POST /api/v1/schedulers/engine/start 显式
-    启动（V1 单机、可控启停语义）。关闭时如仍在运行则等待其结束。
+    调度引擎默认**自动启动**（P1-2 / t_c94bba06）：startup 调用
+    get_scheduler_engine().start() + load_schedules()，使重启后持久化的
+    schedule 自动 re-arm，兑现 docstring "restarts pick up persisted
+    schedules" 的承诺。设置 SCHEDULER_AUTOSTART=0 可恢复旧的显式启停语义
+    （由 POST /api/v1/schedulers/engine/start 手动启动）。Nurture 循环由
+    POST /api/v1/nurture/executions/engine/start 或 NURTURE_SCHEDULER_AUTOSTART=1
+    启动。关闭时如仍在运行则等待其结束。
     """
     from app.services.scheduler.engine import get_scheduler_engine
     await get_scheduler_engine().close()
+    # Stop the nurture tick loop (no-op if it was never started).
+    from app.routers.nurture_execution import _get_engine_loop
+    await _get_engine_loop().stop()
 
 
 @app.get("/api/v1/health")
