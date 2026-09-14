@@ -188,19 +188,17 @@ async function handleCreate() {
 async function testConnection() {
   try {
     const result = await browserStore.testConnection()
-    alert(result.connected ? 'BitBrowser 连接成功！' : 'BitBrowser 连接失败')
+    console.log(result.connected ? 'BitBrowser 连接成功' : 'BitBrowser 连接失败')
   } catch (error) {
     console.error('Failed to test connection:', error)
-    alert('连接测试失败')
   }
 }
 
 async function testProfile(id: string) {
   try {
-    alert('Profile 测试成功！')
+    console.log('Profile 测试成功！')
   } catch (error) {
     console.error('Failed to test profile:', error)
-    alert('测试失败')
   }
 }
 
@@ -306,5 +304,9 @@ async function deleteProfile(id: string) {
   gap: var(--spacing-2);
   padding-top: var(--spacing-3);
   border-top: 1px solid var(--color-border);
+}
+
+.text-muted {
+  color: var(--color-text-muted);
 }
 </style>

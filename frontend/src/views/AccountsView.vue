@@ -8,12 +8,33 @@
       </template>
     </PageHeader>
 
+    <!-- 筛选栏 -->
+    <div class="filters-bar">
+      <div class="filters-bar__left">
+        <select v-model="filterPlatform" class="form-select form-select--sm" @change="handleFilter">
+          <option value="">全部平台</option>
+          <option v-for="platform in platforms" :key="platform.id" :value="platform.code">
+            {{ platform.name }}
+          </option>
+        </select>
+        <select v-model="filterStatus" class="form-select form-select--sm" @change="handleFilter">
+          <option value="">全部状态</option>
+          <option value="connected">已连接</option>
+          <option value="disconnected">未连接</option>
+          <option value="failed">失败</option>
+        </select>
+      </div>
+      <div class="filters-bar__right">
+        <span class="text-muted">{{ filteredAccounts.length }} 个账号</span>
+      </div>
+    </div>
+
     <!-- Loading State -->
     <LoadingState v-if="loading" full-screen />
 
     <!-- Empty State -->
     <EmptyState
-      v-else-if="!loading && accounts.length === 0"
+      v-else-if="!loading && filteredAccounts.length === 0"
       icon="👤"
       title="暂无账号"
       description="添加你的社交媒体账号"
@@ -24,32 +45,13 @@
 
     <!-- Account List -->
     <div v-else class="account-grid">
-      <div
-        v-for="account in accounts"
+      <AccountCard
+        v-for="account in filteredAccounts"
         :key="account.id"
-        class="account-card"
+        :account="account"
         @click="navigateToDetail(account.id)"
-      >
-        <div class="account-card__header">
-          <div class="account-card__platform">
-            <span class="platform-icon">{{ getPlatformIcon(account.platform_id) }}</span>
-            <span class="platform-name">{{ getPlatformName(account.platform_id) }}</span>
-          </div>
-          <StatusBadge :status="account.status" />
-        </div>
-        <div class="account-card__content">
-          <h3 class="account-card__name">{{ account.name }}</h3>
-          <p v-if="account.username" class="account-card__username">@{{ account.username }}</p>
-        </div>
-        <div class="account-card__footer">
-          <button
-            class="btn btn--ghost btn--sm"
-            @click.stop="testConnection(account.id)"
-          >
-            测试连接
-          </button>
-        </div>
-      </div>
+        @test="testConnection(account.id)"
+      />
     </div>
 
     <!-- Create Dialog -->
@@ -58,101 +60,77 @@
       title="新建账号"
       @close="showCreateDialog = false"
     >
-      <form @submit.prevent="handleCreate">
-        <div class="form-group">
-          <label class="form-label">平台</label>
-          <select v-model="createForm.platform_id" class="form-select" required>
-            <option value="wechat">微信</option>
-            <option value="douyin">抖音</option>
-            <option value="weibo">微博</option>
-            <option value="xiaohongshu">小红书</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">账号名称</label>
-          <input
-            v-model="createForm.name"
-            class="form-input"
-            placeholder="请输入账号名称"
-            required
-          />
-        </div>
-        <div class="form-group">
-          <label class="form-label">用户名</label>
-          <input
-            v-model="createForm.username"
-            class="form-input"
-            placeholder="请输入用户名（可选）"
-          />
-        </div>
-        <div class="form-group">
-          <label class="form-label">密码</label>
-          <input
-            v-model="createForm.password"
-            type="password"
-            class="form-input"
-            placeholder="请输入密码"
-          />
-        </div>
-        <ModalFooter>
-          <button
-            type="button"
-            class="btn btn--ghost"
-            @click="showCreateDialog = false"
-          >
-            取消
-          </button>
-          <button type="submit" class="btn btn--primary" :disabled="creating">
-            {{ creating ? '创建中...' : '创建' }}
-          </button>
-        </ModalFooter>
-      </form>
+      <AccountCreateDialog
+        :platforms="platforms"
+        @submit="handleCreate"
+        @cancel="showCreateDialog = false"
+        :creating="creating"
+      />
     </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAccountStore } from '@/stores/account'
-import type { Account } from '@/api/types'
+import { usePlatformStore } from '@/stores/platform'
+import type { Account, Platform } from '@/api/types'
 import PageHeader from '@/components/common/PageHeader.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
-import StatusBadge from '@/components/common/StatusBadge.vue'
 import Modal from '@/components/common/Modal.vue'
-import ModalFooter from '@/components/common/ModalFooter.vue'
+import AccountCard from '@/components/account/AccountCard.vue'
+import { showToast } from '@/utils/toast'
+import AccountCreateDialog from '@/components/account/AccountCreateDialog.vue'
 
 const router = useRouter()
 const accountStore = useAccountStore()
+const platformStore = usePlatformStore()
 
 const accounts = ref<Account[]>([])
+const platforms = ref<Platform[]>([])
 const loading = ref(false)
 const showCreateDialog = ref(false)
 const creating = ref(false)
 
-const createForm = ref({
-  platform_id: 'wechat',
-  name: '',
-  username: '',
-  password: '',
-})
+// 筛选状态
+const filterPlatform = ref('')
+const filterStatus = ref('')
 
-const platformMap: Record<string, { name: string; icon: string }> = {
-  wechat: { name: '微信', icon: '💬' },
-  douyin: { name: '抖音', icon: '🎵' },
-  weibo: { name: '微博', icon: '📢' },
-  xiaohongshu: { name: '小红书', icon: '📕' },
-}
+// 筛选后的账号列表
+const filteredAccounts = computed(() => {
+  return accounts.value.filter(account => {
+    if (filterPlatform.value && account.platform_id !== filterPlatform.value) return false
+    if (filterStatus.value && account.status !== filterStatus.value) return false
+    return true
+  })
+})
 
 onMounted(async () => {
-  await fetchAccounts()
+  await Promise.all([
+    fetchPlatforms(),
+    fetchAccounts()
+  ])
 })
+
+async function fetchPlatforms() {
+  try {
+    const data = await platformStore.fetchPlatforms()
+    platforms.value = data.items
+  } catch (error) {
+    console.error('Failed to fetch platforms:', error)
+  }
+}
 
 async function fetchAccounts() {
   loading.value = true
   try {
-    const data = await accountStore.fetchAccounts()
+    const params: any = {}
+    if (filterPlatform.value) params.platform = filterPlatform.value
+    if (filterStatus.value) params.status = filterStatus.value
+    
+    const data = await accountStore.fetchAccounts(params)
     accounts.value = data.items
   } catch (error) {
     console.error('Failed to fetch accounts:', error)
@@ -161,33 +139,8 @@ async function fetchAccounts() {
   }
 }
 
-function getPlatformIcon(platformId: string) {
-  return platformMap[platformId]?.icon || '📱'
-}
-
-function getPlatformName(platformId: string) {
-  return platformMap[platformId]?.name || platformId
-}
-
-async function handleCreate() {
-  if (!createForm.value.name.trim()) return
-  
-  creating.value = true
-  try {
-    await accountStore.createAccount(createForm.value)
-    showCreateDialog.value = false
-    createForm.value = {
-      platform_id: 'wechat',
-      name: '',
-      username: '',
-      password: '',
-    }
-    await fetchAccounts()
-  } catch (error) {
-    console.error('Failed to create account:', error)
-  } finally {
-    creating.value = false
-  }
+function handleFilter() {
+  fetchAccounts()
 }
 
 function navigateToDetail(id: string) {
@@ -197,77 +150,61 @@ function navigateToDetail(id: string) {
 async function testConnection(id: string) {
   try {
     const result = await accountStore.testConnection(id)
-    alert(result.connected ? '连接成功！' : '连接失败')
+    // 使用 toast 提示而非 alert
+    showToast(result.connected ? '连接成功' : '连接失败：请检查平台配置', result.connected ? 'success' : 'error')
   } catch (error) {
     console.error('Failed to test connection:', error)
-    alert('连接测试失败')
+    showToast('连接测试失败，请检查平台配置', 'error')
+  }
+}
+
+async function handleCreate(data: any) {
+  creating.value = true
+  try {
+    await accountStore.createAccount(data)
+    showToast('账号创建成功', 'success')
+    showCreateDialog.value = false
+    await fetchAccounts()
+  } catch (error: any) {
+    console.error('Failed to create account:', error)
+    showToast(error?.message || '账号创建失败，请检查平台配置后重试', 'error')
+  } finally {
+    creating.value = false
   }
 }
 </script>
 
 <style scoped>
+.filters-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-5);
+  padding: var(--spacing-3) var(--spacing-4);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.filters-bar__left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+.form-select--sm {
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-sm);
+}
+
 .account-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--spacing-4);
 }
 
-.account-card {
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: var(--spacing-5);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.account-card:hover {
-  border-color: var(--color-primary);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
-}
-
-.account-card__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--spacing-3);
-}
-
-.account-card__platform {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-}
-
-.platform-icon {
-  font-size: 24px;
-}
-
-.platform-name {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
-
-.account-card__content {
-  margin-bottom: var(--spacing-3);
-}
-
-.account-card__name {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0 0 var(--spacing-1);
-}
-
-.account-card__username {
-  font-size: var(--font-size-sm);
+.text-muted {
   color: var(--color-text-muted);
-  margin: 0;
-}
-
-.account-card__footer {
-  padding-top: var(--spacing-3);
-  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
 }
 </style>

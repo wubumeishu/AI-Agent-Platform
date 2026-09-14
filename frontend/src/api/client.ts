@@ -68,6 +68,25 @@ apiClient.interceptors.response.use(
   },
   (error: any) => {
     const status = error.response?.status
+    // FastAPI 业务错误信封 ({code, message}) — 保留原始 message (如 P0-2
+    // "trusted producer Bearer token required"), 不套用通用 HTTP 文案
+    const body = error.response?.data
+    const bizDetail =
+      body && typeof body === 'object' && 'detail' in body
+        ? body.detail
+        : null
+    if (
+      bizDetail &&
+      typeof bizDetail === 'object' &&
+      'message' in bizDetail &&
+      typeof bizDetail.message === 'string'
+    ) {
+      const err: any = new Error(bizDetail.message)
+      err.code = bizDetail.code
+      err.isBusinessError = true
+      err.response = error.response
+      return Promise.reject(err)
+    }
     let message = '网络错误'
     
     switch (status) {

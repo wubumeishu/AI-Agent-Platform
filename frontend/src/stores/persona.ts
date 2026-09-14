@@ -91,6 +91,15 @@ export const usePersonaStore = defineStore('persona', () => {
     }
   }
 
+  async function fetchVersions(id: string): Promise<Persona[]> {
+    try {
+      return await personaApi.versions(id)
+    } catch (error) {
+      console.error('[PersonaStore] Failed to fetch versions:', error)
+      throw error
+    }
+  }
+
   function clearCurrentPersona() {
     currentPersona.value = null
   }
@@ -108,6 +117,7 @@ export const usePersonaStore = defineStore('persona', () => {
     updatePersona,
     deletePersona,
     clone,
+    fetchVersions,
     clearCurrentPersona,
   }
 })

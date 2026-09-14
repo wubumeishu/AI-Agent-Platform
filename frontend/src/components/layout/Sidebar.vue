@@ -59,12 +59,39 @@ const route = useRoute()
 const menuItems = [
   { path: '/', label: '首页', icon: '🏠' },
   { path: '/dashboard', label: '工作台', icon: '📊' },
+  { path: '/chats', label: '对话', icon: '💬' },
+  { path: '/conversations', label: '会话管理', icon: '📨' },
   { path: '/agents', label: 'Agent 管理', icon: '🤖' },
   { path: '/personas', label: 'Persona 管理', icon: '🎭' },
   { path: '/accounts', label: '账号管理', icon: '👤' },
   { path: '/platforms', label: '平台管理', icon: '🔌' },
   { path: '/browsers', label: '浏览器管理', icon: '🌐' },
   { path: '/proxies', label: '代理管理', icon: '🔀' },
+  {
+    path: '/private-domain',
+    label: '私域运营',
+    icon: '🏷️',
+    children: [
+      { path: '/private-domain/channels', label: '渠道管理' },
+      { path: '/private-domain/nurture', label: '培育计划' },
+      { path: '/private-domain/segments', label: '客户群' },
+      { path: '/private-domain/deals', label: '商机漏斗' },
+      { path: '/private-domain/content', label: '内容库' },
+    ],
+  },
+  { path: '/crm', label: 'CRM 管理', icon: '📈', children: [
+      { path: '/crm/customers', label: '客户管理' },
+      { path: '/crm/leads', label: '线索管理' },
+      { path: '/crm/tags', label: '标签管理' },
+    ]},
+  { path: '/workflows', label: '工作流', icon: '🧩', children: [
+      { path: '/workflows', label: '工作流列表' },
+    ]},
+  { path: '/prompts', label: 'Prompt 模板', icon: '📝', children: [
+      { path: '/prompts/templates', label: '模板列表' },
+      { path: '/prompts/version-history-demo', label: '版本历史（演示）' },
+      { path: '/prompts/preview-demo', label: '预览弹窗（演示）' },
+    ]},
   { path: '/settings', label: '设置', icon: '⚙️' },
 ]
 

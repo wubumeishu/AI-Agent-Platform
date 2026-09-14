@@ -45,7 +45,7 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-  async function createAgent(data: { name: string; description?: string }) {
+  async function createAgent(data: { name: string; description?: string; icon?: string }) {
     try {
       const agent = await agentApi.create(data)
       agents.value.unshift(agent)
@@ -91,10 +91,10 @@ export const useAgentStore = defineStore('agent', () => {
       await agentApi.start(id)
       const agent = agents.value.find(a => a.id === id)
       if (agent) {
-        agent.status = 'running'
+        agent.status = 'active'
       }
       if (currentAgent.value?.id === id) {
-        currentAgent.value.status = 'running'
+        currentAgent.value.status = 'active'
       }
     } catch (error) {
       console.error('[AgentStore] Failed to start agent:', error)
@@ -107,10 +107,10 @@ export const useAgentStore = defineStore('agent', () => {
       await agentApi.stop(id)
       const agent = agents.value.find(a => a.id === id)
       if (agent) {
-        agent.status = 'stopped'
+        agent.status = 'inactive'
       }
       if (currentAgent.value?.id === id) {
-        currentAgent.value.status = 'stopped'
+        currentAgent.value.status = 'inactive'
       }
     } catch (error) {
       console.error('[AgentStore] Failed to stop agent:', error)

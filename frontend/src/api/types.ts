@@ -11,7 +11,8 @@ export interface Agent {
   id: string
   name: string
   description: string
-  status: 'running' | 'stopped' | 'error'
+  // 后端合法状态: active | inactive | paused（保留 running/stopped/error 以兼容存量 UI 标记）
+  status: 'running' | 'stopped' | 'error' | 'active' | 'inactive' | 'paused'
   persona_name?: string
   icon?: string
   created_at: string
@@ -305,16 +306,19 @@ export interface Customer {
   phone?: string
   company?: string
   avatar_url?: string
-  stage?: CustomerStage
+  extra_info?: Record<string, unknown>
   tags: CustomerTag[]
-  identities: CustomerIdentity[]
+  // 注意：列表接口只返回 identities_count（不嵌套身份），详情接口才返回完整 identities 数组
+  identities?: CustomerIdentity[]
+  identities_count?: number
   created_at: string
   updated_at: string
 }
 
 export interface CustomerListParams {
-  page?: number
-  page_size?: number
+  // 后端分页参数为 skip/limit（与 Lead/Tag 列表一致）
+  skip?: number
+  limit?: number
   name?: string
   phone?: string
   email?: string
@@ -322,6 +326,16 @@ export interface CustomerListParams {
   stage_code?: string
   sort_by?: string
   sort_order?: 'asc' | 'desc'
+}
+
+export interface CustomerIdentityRequest {
+  platform: string
+  platform_account_id: string
+  platform_username?: string
+  phone?: string
+  email?: string
+  external_id?: string
+  source?: string
 }
 
 export interface CustomerListResponse {

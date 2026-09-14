@@ -24,25 +24,12 @@
 
     <!-- Persona Grid -->
     <div v-else class="persona-grid">
-      <div
+      <PersonaCard
         v-for="persona in personas"
         :key="persona.id"
-        class="persona-card"
+        :persona="persona"
         @click="navigateToDetail(persona.id)"
-      >
-        <div class="persona-card__header">
-          <div class="persona-card__icon">🎭</div>
-          <span class="persona-card__version">v{{ persona.version }}</span>
-        </div>
-        <div class="persona-card__content">
-          <h3 class="persona-card__name">{{ persona.name }}</h3>
-          <p class="persona-card__desc">{{ persona.description || '暂无描述' }}</p>
-          <div class="persona-card__preview">
-            <span class="preview-tag">{{ persona.personality.tone }}</span>
-            <span class="preview-tag">{{ persona.personality.reply_length }}</span>
-          </div>
-        </div>
-      </div>
+      />
     </div>
 
     <!-- Create Dialog -->
@@ -53,14 +40,32 @@
     >
       <form @submit.prevent="handleCreate">
         <div class="form-group">
-          <label class="form-label">Persona 名称</label>
+          <label class="form-label">Persona 名称 <span class="required">*</span></label>
           <input
             v-model="createForm.name"
             class="form-input"
             placeholder="请输入 Persona 名称"
             required
+            autofocus
           />
         </div>
+        
+        <div class="form-group">
+          <label class="form-label">头像图标</label>
+          <div class="icon-picker">
+            <button
+              v-for="icon in availableIcons"
+              :key="icon"
+              type="button"
+              class="icon-btn"
+              :class="{ 'icon-btn--active': createForm.icon === icon }"
+              @click="createForm.icon = icon"
+            >
+              {{ icon }}
+            </button>
+          </div>
+        </div>
+        
         <div class="form-group">
           <label class="form-label">描述</label>
           <textarea
@@ -70,36 +75,36 @@
             rows="2"
           ></textarea>
         </div>
+        
         <div class="form-group">
-          <label class="form-label">语气</label>
+          <label class="form-label">语气风格</label>
           <select v-model="createForm.personality.tone" class="form-select">
-            <option value="professional">专业</option>
-            <option value="friendly">友好</option>
-            <option value="casual">随意</option>
+            <option value="professional">专业严谨</option>
+            <option value="friendly">友好亲切</option>
+            <option value="casual">随意轻松</option>
           </select>
         </div>
+        
         <div class="form-group">
           <label class="form-label">回复长度</label>
           <select v-model="createForm.personality.reply_length" class="form-select">
-            <option value="concise">简洁</option>
-            <option value="balanced">适中</option>
-            <option value="detailed">详细</option>
+            <option value="concise">简洁明了</option>
+            <option value="balanced">适中平衡</option>
+            <option value="detailed">详细全面</option>
           </select>
         </div>
+        
         <div class="form-group">
           <label class="form-label">主动性</label>
           <select v-model="createForm.personality.proactiveness" class="form-select">
-            <option value="low">低</option>
-            <option value="medium">中</option>
-            <option value="high">高</option>
+            <option value="low">被动响应</option>
+            <option value="medium">适中引导</option>
+            <option value="high">主动推进</option>
           </select>
         </div>
+        
         <ModalFooter>
-          <button
-            type="button"
-            class="btn btn--ghost"
-            @click="showCreateDialog = false"
-          >
+          <button type="button" class="btn btn--ghost" @click="showCreateDialog = false">
             取消
           </button>
           <button type="submit" class="btn btn--primary" :disabled="creating">
@@ -119,6 +124,7 @@ import type { Persona } from '@/api/types'
 import PageHeader from '@/components/common/PageHeader.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import PersonaCard from '@/components/persona/PersonaCard.vue'
 import Modal from '@/components/common/Modal.vue'
 import ModalFooter from '@/components/common/ModalFooter.vue'
 
@@ -130,9 +136,12 @@ const loading = ref(false)
 const showCreateDialog = ref(false)
 const creating = ref(false)
 
+const availableIcons = ['🎭', '💬', '👤', '🤖', '💡', '🎯', '⚡', '🔧', '📝', '🎨']
+
 const createForm = ref({
   name: '',
   description: '',
+  icon: '🎭',
   personality: {
     tone: 'professional',
     reply_length: 'concise',
@@ -162,11 +171,16 @@ async function handleCreate() {
   
   creating.value = true
   try {
-    await personaStore.createPersona(createForm.value)
+    await personaStore.createPersona({
+      name: createForm.value.name,
+      description: createForm.value.description || undefined,
+      personality: createForm.value.personality,
+    })
     showCreateDialog.value = false
     createForm.value = {
       name: '',
       description: '',
+      icon: '🎭',
       personality: {
         tone: 'professional',
         reply_length: 'concise',
@@ -194,79 +208,37 @@ function navigateToDetail(id: string) {
   gap: var(--spacing-4);
 }
 
-.persona-card {
+.required {
+  color: var(--color-error);
+}
+
+.icon-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
   background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: var(--spacing-5);
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
-.persona-card:hover {
+.icon-btn:hover {
   border-color: var(--color-primary);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
+  transform: scale(1.1);
 }
 
-.persona-card__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: var(--spacing-3);
-}
-
-.persona-card__icon {
-  width: 48px;
-  height: 48px;
+.icon-btn--active {
+  border-color: var(--color-primary);
   background: var(--color-primary-light);
-  border-radius: var(--radius-full);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-}
-
-.persona-card__version {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  background: var(--color-bg-tertiary);
-  padding: var(--spacing-1) var(--spacing-2);
-  border-radius: var(--radius-sm);
-}
-
-.persona-card__content {
-  margin-bottom: var(--spacing-3);
-}
-
-.persona-card__name {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0 0 var(--spacing-1);
-}
-
-.persona-card__desc {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  margin: 0 0 var(--spacing-2);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.persona-card__preview {
-  display: flex;
-  gap: var(--spacing-2);
-  flex-wrap: wrap;
-}
-
-.preview-tag {
-  font-size: var(--font-size-xs);
-  padding: var(--spacing-1) var(--spacing-2);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-sm);
 }
 </style>

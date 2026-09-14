@@ -165,6 +165,7 @@ export const useCustomerStore = defineStore('customer', () => {
     addCustomerIdentity,
     fetchCustomerLeads,
     fetchCustomerActivities,
+    fetchCustomerConversations,
     clearCurrentCustomer,
   }
 })

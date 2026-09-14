@@ -8,6 +8,14 @@
       </template>
     </PageHeader>
 
+    <!-- Filter Bar -->
+    <AgentFilterBar
+      :total="agentStore.total"
+      @search="handleSearch"
+      @filter="handleFilter"
+      @sort="handleSort"
+    />
+
     <!-- Loading State -->
     <LoadingState v-if="loading" full-screen />
 
@@ -22,84 +30,26 @@
       @action="showCreateDialog = true"
     />
 
-    <!-- Agent List -->
+    <!-- Agent Grid -->
     <div v-else class="agent-grid">
-      <div
+      <AgentCard
         v-for="agent in agents"
         :key="agent.id"
-        class="agent-card"
+        :agent="agent"
         @click="navigateToDetail(agent.id)"
-      >
-        <div class="agent-card__header">
-          <div class="agent-card__avatar">🤖</div>
-          <StatusBadge :status="agent.status" />
-        </div>
-        <div class="agent-card__content">
-          <h3 class="agent-card__name">{{ agent.name }}</h3>
-          <p class="agent-card__desc">{{ agent.description || '暂无描述' }}</p>
-          <div class="agent-card__footer">
-            <span v-if="agent.persona_name" class="agent-card__persona">
-              👤 {{ agent.persona_name }}
-            </span>
-            <span class="agent-card__time">
-              {{ formatTime(agent.created_at) }}
-            </span>
-          </div>
-        </div>
-        <div class="agent-card__actions" @click.stop>
-          <button class="btn btn--ghost btn--sm" @click="startAgent(agent.id)">
-            ▶ 启动
-          </button>
-          <button
-            v-if="agent.status === 'running'"
-            class="btn btn--ghost btn--sm"
-            @click="stopAgent(agent.id)"
-          >
-            ⏹ 停止
-          </button>
-        </div>
-      </div>
+        @start="handleStart(agent.id)"
+        @stop="handleStop(agent.id)"
+        @delete="handleDelete(agent.id)"
+      />
     </div>
 
     <!-- Create Dialog -->
-    <Modal
+    <AgentCreateDialog
       v-if="showCreateDialog"
-      title="新建 Agent"
+      :open="showCreateDialog"
       @close="showCreateDialog = false"
-    >
-      <form @submit.prevent="handleCreate">
-        <div class="form-group">
-          <label class="form-label">Agent 名称</label>
-          <input
-            v-model="createForm.name"
-            class="form-input"
-            placeholder="请输入 Agent 名称"
-            required
-          />
-        </div>
-        <div class="form-group">
-          <label class="form-label">描述</label>
-          <textarea
-            v-model="createForm.description"
-            class="form-textarea"
-            placeholder="请输入描述（可选）"
-            rows="3"
-          ></textarea>
-        </div>
-        <ModalFooter>
-          <button
-            type="button"
-            class="btn btn--ghost"
-            @click="showCreateDialog = false"
-          >
-            取消
-          </button>
-          <button type="submit" class="btn btn--primary" :disabled="creating">
-            {{ creating ? '创建中...' : '创建' }}
-          </button>
-        </ModalFooter>
-      </form>
-    </Modal>
+      @submit="handleCreate"
+    />
   </div>
 </template>
 
@@ -111,9 +61,9 @@ import type { Agent } from '@/api/types'
 import PageHeader from '@/components/common/PageHeader.vue'
 import LoadingState from '@/components/common/LoadingState.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
-import StatusBadge from '@/components/common/StatusBadge.vue'
-import Modal from '@/components/common/Modal.vue'
-import ModalFooter from '@/components/common/ModalFooter.vue'
+import AgentFilterBar from '@/components/agent/AgentFilterBar.vue'
+import AgentCard from '@/components/agent/AgentCard.vue'
+import AgentCreateDialog from '@/components/agent/AgentCreateDialog.vue'
 
 const router = useRouter()
 const agentStore = useAgentStore()
@@ -121,12 +71,10 @@ const agentStore = useAgentStore()
 const agents = ref<Agent[]>([])
 const loading = ref(false)
 const showCreateDialog = ref(false)
-const creating = ref(false)
-
-const createForm = ref({
-  name: '',
-  description: '',
-})
+const searchQuery = ref('')
+const statusFilter = ref('')
+const sortField = ref('created_at')
+const sortOrder = ref<'asc' | 'desc'>('desc')
 
 onMounted(async () => {
   await fetchAgents()
@@ -135,7 +83,14 @@ onMounted(async () => {
 async function fetchAgents() {
   loading.value = true
   try {
-    const data = await agentStore.fetchAgents()
+    const params: any = {
+      page: 1,
+      page_size: 100,
+    }
+    if (statusFilter.value) params.status = statusFilter.value
+    if (searchQuery.value) params.search = searchQuery.value
+    
+    const data = await agentStore.fetchAgents(params)
     agents.value = data.items
   } catch (error) {
     console.error('Failed to fetch agents:', error)
@@ -144,19 +99,29 @@ async function fetchAgents() {
   }
 }
 
-async function handleCreate() {
-  if (!createForm.value.name.trim()) return
-  
-  creating.value = true
+function handleSearch(query: string) {
+  searchQuery.value = query
+  fetchAgents()
+}
+
+function handleFilter(filter: { status: string }) {
+  statusFilter.value = filter.status
+  fetchAgents()
+}
+
+function handleSort(sort: { field: string; order: 'asc' | 'desc' }) {
+  sortField.value = sort.field
+  sortOrder.value = sort.order
+  fetchAgents()
+}
+
+async function handleCreate(data: { name: string; description?: string; icon?: string }) {
   try {
-    await agentStore.createAgent(createForm.value)
+    await agentStore.createAgent(data)
     showCreateDialog.value = false
-    createForm.value = { name: '', description: '' }
     await fetchAgents()
   } catch (error) {
     console.error('Failed to create agent:', error)
-  } finally {
-    creating.value = false
   }
 }
 
@@ -164,7 +129,7 @@ function navigateToDetail(id: string) {
   router.push(`/agents/${id}`)
 }
 
-async function startAgent(id: string) {
+async function handleStart(id: string) {
   try {
     await agentStore.startAgent(id)
     await fetchAgents()
@@ -173,7 +138,7 @@ async function startAgent(id: string) {
   }
 }
 
-async function stopAgent(id: string) {
+async function handleStop(id: string) {
   try {
     await agentStore.stopAgent(id)
     await fetchAgents()
@@ -182,88 +147,21 @@ async function stopAgent(id: string) {
   }
 }
 
-function formatTime(time: string) {
-  return new Date(time).toLocaleDateString('zh-CN')
+async function handleDelete(id: string) {
+  if (!confirm('确定要删除这个 Agent 吗？')) return
+  try {
+    await agentStore.deleteAgent(id)
+    await fetchAgents()
+  } catch (error) {
+    console.error('Failed to delete agent:', error)
+  }
 }
 </script>
 
 <style scoped>
 .agent-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: var(--spacing-4);
-}
-
-.agent-card {
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: var(--spacing-5);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.agent-card:hover {
-  border-color: var(--color-primary);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
-}
-
-.agent-card__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--spacing-3);
-}
-
-.agent-card__avatar {
-  width: 48px;
-  height: 48px;
-  background: var(--color-primary-light);
-  border-radius: var(--radius-full);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-}
-
-.agent-card__content {
-  margin-bottom: var(--spacing-4);
-}
-
-.agent-card__name {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  margin: 0 0 var(--spacing-1);
-}
-
-.agent-card__desc {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  margin: 0 0 var(--spacing-3);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.agent-card__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-}
-
-.agent-card__persona {
-  color: var(--color-primary);
-}
-
-.agent-card__actions {
-  display: flex;
-  gap: var(--spacing-2);
-  padding-top: var(--spacing-3);
-  border-top: 1px solid var(--color-border);
 }
 </style>

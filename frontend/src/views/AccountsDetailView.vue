@@ -20,13 +20,16 @@
                 @{{ currentAccount.username }}
               </p>
             </div>
-            <StatusBadge :status="(currentAccount.status as any)" />
+            <StatusBadge :status="currentAccount.status as any" />
           </div>
         </template>
         <div class="account-info-card__meta">
           <span>平台: {{ getPlatformName(currentAccount.platform_id) }}</span>
           <span v-if="currentAccount.last_login">
             最后登录: {{ formatTime(currentAccount.last_login) }}
+          </span>
+          <span v-if="currentAccount.created_at">
+            创建时间: {{ formatTime(currentAccount.created_at) }}
           </span>
         </div>
       </Card>
@@ -40,32 +43,17 @@
       <div class="tab-content">
         <!-- Agent Binding Tab -->
         <div v-if="activeTab === 'agent'" class="tab-panel">
-          <Card>
-            <template #header>
-              <h3>绑定 Agent</h3>
-            </template>
-            <p class="text-muted">暂无绑定的 Agent</p>
-          </Card>
+          <TabAgentBinding :account-id="accountId" />
         </div>
 
         <!-- Browser Binding Tab -->
         <div v-if="activeTab === 'browser'" class="tab-panel">
-          <Card>
-            <template #header>
-              <h3>绑定 Browser</h3>
-            </template>
-            <p class="text-muted">暂无绑定的 Browser Profile</p>
-          </Card>
+          <TabBrowserBinding :account-id="accountId" />
         </div>
 
         <!-- Proxy Binding Tab -->
         <div v-if="activeTab === 'proxy'" class="tab-panel">
-          <Card>
-            <template #header>
-              <h3>绑定 Proxy</h3>
-            </template>
-            <p class="text-muted">暂无绑定的 Proxy</p>
-          </Card>
+          <TabProxyBinding :account-id="accountId" />
         </div>
       </div>
 
@@ -75,7 +63,7 @@
           <h3>连接状态</h3>
         </template>
         <div class="connection-status">
-          <StatusBadge :status="(currentAccount?.status as any)" />
+          <StatusBadge :status="currentAccount?.status as any" />
           <button class="btn btn--primary ml-4" @click="testConnection">
             测试连接
           </button>
@@ -94,10 +82,14 @@ import PageHeader from '@/components/common/PageHeader.vue'
 import Card from '@/components/common/Card.vue'
 import StatusBadge from '@/components/common/StatusBadge.vue'
 import Tabs from '@/components/common/Tabs.vue'
+import TabAgentBinding from '@/components/account/tabs/TabAgentBinding.vue'
+import TabBrowserBinding from '@/components/account/tabs/TabBrowserBinding.vue'
+import TabProxyBinding from '@/components/account/tabs/TabProxyBinding.vue'
 
 const route = useRoute()
 const accountStore = useAccountStore()
 
+const accountId = ref(route.params.id as string)
 const activeTab = ref('agent')
 const currentAccount = ref<Account | null>(null)
 const currentAccountLoading = ref(false)
@@ -116,12 +108,14 @@ const platformMap: Record<string, { name: string; icon: string }> = {
 }
 
 onMounted(async () => {
-  const id = route.params.id as string
-  await fetchAccount(id)
+  await fetchAccount(accountId.value)
 })
 
 watch(() => route.params.id, async (newId) => {
-  if (newId) await fetchAccount(newId as string)
+  if (newId) {
+    accountId.value = newId as string
+    await fetchAccount(newId as string)
+  }
 })
 
 async function fetchAccount(id: string) {
@@ -149,13 +143,11 @@ function formatTime(time: string) {
 }
 
 async function testConnection() {
-  const id = route.params.id as string
   try {
-    const result = await accountStore.testConnection(id)
-    alert(result.connected ? '连接成功！' : '连接失败')
+    const result = await accountStore.testConnection(accountId.value)
+    console.log(result.connected ? '连接成功' : '连接失败')
   } catch (error) {
     console.error('Failed to test connection:', error)
-    alert('连接测试失败')
   }
 }
 </script>
@@ -188,6 +180,7 @@ async function testConnection() {
 
 .account-info-card__meta {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--spacing-4);
   margin-top: var(--spacing-4);
   font-size: var(--font-size-sm);

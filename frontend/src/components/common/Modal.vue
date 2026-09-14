@@ -1,6 +1,6 @@
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
-    <div class="modal">
+    <div class="modal" :style="width ? { width, maxWidth: width } : undefined">
       <div class="modal__header">
         <h3 class="modal__title">{{ title }}</h3>
         <button class="modal__close" @click="$emit('close')">×</button>
@@ -18,6 +18,8 @@
 <script setup lang="ts">
 defineProps<{
   title: string
+  /** 弹窗宽度（如 '600px'）；不传则使用默认 560px */
+  width?: string
 }>()
 
 defineEmits<{

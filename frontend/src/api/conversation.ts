@@ -127,7 +127,7 @@ export const conversationApi = {
     signal?: AbortSignal,
     onEvent?: (event: StreamEvent) => void
   ): Promise<void> {
-    const url = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'}/${BASE}/${conversationId}/chat/stream?message=${encodeURIComponent(message)}`
+    const url = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001/api/v1'}/${BASE}/${conversationId}/chat/stream?message=${encodeURIComponent(message)}`
     return fetch(url, {
       method: 'POST',
       headers: { Accept: 'text/event-stream' },

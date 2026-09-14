@@ -6,64 +6,15 @@
       <p>Persona 不存在</p>
     </div>
 
-    <div v-else class="persona-editor">
-      <Card>
-        <template #header>
-          <h3>基本信息</h3>
-        </template>
-        <div class="form-group">
-          <label class="form-label">名称</label>
-          <input
-            v-model="editForm.name"
-            class="form-input"
-          />
-        </div>
-        <div class="form-group">
-          <label class="form-label">描述</label>
-          <textarea
-            v-model="editForm.description"
-            class="form-textarea"
-            rows="3"
-          ></textarea>
-        </div>
-      </Card>
-
-      <Card class="mt-5">
-        <template #header>
-          <h3>性格参数</h3>
-        </template>
-        <div class="form-group">
-          <label class="form-label">语气</label>
-          <select v-model="editForm.personality.tone" class="form-select">
-            <option value="professional">专业</option>
-            <option value="friendly">友好</option>
-            <option value="casual">随意</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">回复长度</label>
-          <select v-model="editForm.personality.reply_length" class="form-select">
-            <option value="concise">简洁</option>
-            <option value="balanced">适中</option>
-            <option value="detailed">详细</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">主动性</label>
-          <select v-model="editForm.personality.proactiveness" class="form-select">
-            <option value="low">低</option>
-            <option value="medium">中</option>
-            <option value="high">高</option>
-          </select>
-        </div>
-      </Card>
-
-      <div class="actions mt-5">
-        <button class="btn btn--primary" :disabled="saving" @click="handleSave">
-          {{ saving ? '保存中...' : '保存修改' }}
-        </button>
-        <button class="btn btn--ghost ml-2" @click="handleClone">克隆为新版</button>
-      </div>
+    <div v-else>
+      <PersonaEditor
+        :persona="currentPersona"
+        :versions="versions"
+        @save="handleSave"
+        @clone="handleClone"
+        @delete="handleDelete"
+        @view-all="router.push('/personas')"
+      />
     </div>
   </div>
 </template>
@@ -74,7 +25,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { usePersonaStore } from '@/stores/persona'
 import type { Persona } from '@/api/types'
 import PageHeader from '@/components/common/PageHeader.vue'
-import Card from '@/components/common/Card.vue'
+import PersonaEditor from '@/components/persona/PersonaEditor.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -82,26 +33,19 @@ const personaStore = usePersonaStore()
 
 const currentPersona = ref<Persona | null>(null)
 const currentPersonaLoading = ref(false)
-const saving = ref(false)
-
-const editForm = ref({
-  name: '',
-  description: '',
-  personality: {
-    tone: 'professional',
-    reply_length: 'concise',
-    proactiveness: 'medium',
-    style_boundaries: [] as string[],
-  },
-})
+const versions = ref<Persona[]>([])
 
 onMounted(async () => {
   const id = route.params.id as string
   await fetchPersona(id)
+  await fetchVersions(id)
 })
 
 watch(() => route.params.id, async (newId) => {
-  if (newId) await fetchPersona(newId as string)
+  if (newId) {
+    await fetchPersona(newId as string)
+    await fetchVersions(newId as string)
+  }
 })
 
 async function fetchPersona(id: string) {
@@ -109,11 +53,6 @@ async function fetchPersona(id: string) {
   try {
     const persona = await personaStore.fetchPersona(id)
     currentPersona.value = persona
-    editForm.value = {
-      name: persona.name,
-      description: persona.description || '',
-      personality: { ...persona.personality },
-    }
   } catch (error) {
     console.error('Failed to fetch persona:', error)
   } finally {
@@ -121,15 +60,28 @@ async function fetchPersona(id: string) {
   }
 }
 
-async function handleSave() {
-  saving.value = true
+async function fetchVersions(id: string) {
   try {
-    await personaStore.updatePersona(route.params.id as string, editForm.value)
+    const versionsData = await personaStore.fetchVersions(id)
+    versions.value = versionsData
+  } catch (error) {
+    console.error('Failed to fetch versions:', error)
+  }
+}
+
+async function handleSave() {
+  if (!currentPersona.value) return
+  
+  try {
+    await personaStore.updatePersona(route.params.id as string, {
+      name: currentPersona.value.name,
+      description: currentPersona.value.description || undefined,
+      personality: currentPersona.value.personality,
+    })
+    // Show success feedback
     alert('保存成功！')
   } catch (error) {
     console.error('Failed to save persona:', error)
-  } finally {
-    saving.value = false
   }
 }
 
@@ -141,25 +93,22 @@ async function handleClone() {
     console.error('Failed to clone persona:', error)
   }
 }
+
+async function handleDelete() {
+  if (!confirm('确定要删除这个 Persona 吗？此操作不可恢复。')) return
+  try {
+    await personaStore.deletePersona(route.params.id as string)
+    router.push('/personas')
+  } catch (error) {
+    console.error('Failed to delete persona:', error)
+  }
+}
 </script>
 
 <style scoped>
-.persona-editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-4);
-}
-
-.actions {
-  display: flex;
-  align-items: center;
-}
-
-.ml-2 {
-  margin-left: var(--spacing-2);
-}
-
-.mt-5 {
-  margin-top: var(--spacing-5);
+.empty-state {
+  text-align: center;
+  padding: var(--spacing-12);
+  color: var(--color-text-muted);
 }
 </style>

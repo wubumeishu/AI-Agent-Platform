@@ -9,7 +9,7 @@
 import { computed } from 'vue'
 
 const props = defineProps<{
-  status: 'success' | 'warning' | 'error' | 'info' | 'running' | 'stopped' | 'connected' | 'disconnected' | 'failed'
+  status: string
   label?: string
 }>()
 
@@ -22,6 +22,9 @@ const label = computed(() => {
     info: '信息',
     running: '运行中',
     stopped: '已停止',
+    active: '运行中',
+    inactive: '已停止',
+    paused: '已暂停',
     connected: '已连接',
     disconnected: '未连接',
     failed: '失败',
