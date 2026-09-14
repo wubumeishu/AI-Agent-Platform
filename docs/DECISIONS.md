@@ -191,3 +191,142 @@ All green alongside the 84-integrity + nurture + content-generation suites.
 **Follow-up (tech debt / security):** Owned by the security-hardening task; do not "fix" casually from the workflow lane.
 
 **Source:** Workflow Architecture Review t_c81d72fe P2-5, recorded in t_c94bba06, 2026-09-14
+
+---
+
+## ADR-016  P1-003 Conversation CRUD Router Restored in Shipped `app.main`
+
+**Status:** Accepted - Restored + Verified (revertable)
+
+**Decision:** Re-mount the P1-003 conversation CRUD router in the shipped
+`backend/app/main.py`:
+
+```python
+from app.routers.conversations import router as conversations_router
+app.include_router(conversations_router, prefix="/api/v1")
+```
+
+`conversations_router` now exposes `/api/v1/conversations` CRUD
+(list / create / get / update / delete / restore / search / sort,
+plus `/messages`, `/messages/stats`, and the P1-003 SSE
+`/messages/stream`). The mount is mounted **WITH** the `prefix="/api/v1"`
+argument, matching every other `/api/v1`-mounted router in `main.py`
+(the ADR-012 single-prefix convention); `conversations.py` declares
+bare routes (`/conversations`) so no double-prefix results.
+
+**Reason:** P1-003 (t_898db8ab) was a formally delivered + tested
+feature whose delivery notes (`backend/docs/P1-003-delivery-notes.md`)
+explicitly include the router mount and 95 passing conversation tests.
+Yet the shipped `main.py` carried two `# P1-003 shelved:` commented-out
+lines that disabled the mount, with **no recorded decision** in
+DECISIONS.md, ROADMAP.md, or any doc. The rest of the app is explicitly
+scaffolded around P1-003 being live (the `_WorkflowCrmAutoflush` SSE
+comment at line ~131 names P1-003's `/messages/stream`; the
+`workflow_conversation_bridge`, `conversation_lead_bridge`, and
+P5MSG-04 realtime conversation-management read endpoints all assume the
+router is present). P5MSG-08 QA (t_affbf15e) proved the router is fully
+functional when re-mounted (main flow 24/25 PASS on the QA overlay) —
+only the mount was missing — and that the shipped product returns 100%
+404 on the entire "open conversation list → detail → load history" main
+user flow (P5MSG-08 DEFECT-2).
+
+**Shelving was an undocumented hold, NOT a justified architectural
+decision.** Shelving a delivered+tested feature without a recorded
+decision violates the orchestrator forbidden-action rule ("change
+architecture without recording a decision"). No card, review, or ADR
+justified removing it, so the hold is treated as drift and restored.
+
+**Acceptance:** On shipped `uvicorn app.main:app` (no QA overlay),
+`GET /api/v1/conversations/` returns 200 (not 404), and
+`POST /api/v1/conversations/` returns 201. Verified in the follow-up
+verification task.
+
+**Downstream note:** P5MSG-08 DEFECT-1 (P0, t_8c059295) — the
+`ConversationBase.channel` pattern 500 on `douyin`/`xiaohongshu` rows —
+now becomes *reachable* on the shipped list/detail endpoints because the
+router is mounted. DEFECT-1 must land before the P5MSG main-flow
+"100% pass" acceptance is re-tested; this ADR does not itself fix the
+channel pattern.
+
+**Follow-up:** Restored mount is a 2-line, reversible change; re-shelving
+is only permitted with a new recorded ADR.
+
+**Source:** P5MSG-08 QA defect P5MSG-D3, decided + applied by
+project-orchestrator t_3610a964, 2026-09-14
+
+---
+
+## ADR-017  Message State-Transition Audit: ExecutionLog Is the Single Source of Truth (dual-write SoT convergence + P5MSG-02 ExecutionLog reuse)
+
+**Status:** Accepted - Implemented (2026-09-14, P5MSG-12-AR-1, t_8bd0d6a9)
+
+**Decision:** The message delivery state-machine audit trail has exactly
+**one** write source: the platform `execution_log` table
+(`ExecutionLog`, `execution_type='message_status'`).
+
+1. **SoT choice (P0-1 dual-write convergence).** P5MSG-02's
+   `MessageService.update_status` previously wrote the *same* transition to
+   two stores atomically — a per-row append-only `messages.receipts` JSONB
+   **and** an `execution_log` row (plus the enqueue path logged a row but
+   wrote no receipt). That is a textbook dual-write that violates
+   single-source-of-truth. Decision: **`execution_log` is the audit SoT.**
+   The per-row `messages.receipts` JSONB is **demoted to a deprecated,
+   read-only legacy column** — it is no longer written by the state
+   machine. The API-facing read (`GET /api/v1/messages/{id}/receipt`) now
+   **projects** the receipt trail from the SoT (`_project_receipts`),
+   excluding the `to='queued'` enqueue row so the API surface is unchanged.
+   `messages.last_receipt_at` is kept as a lightweight, denormalized
+   "when last acknowledged" scalar (an API-facing convenience subset of
+   the SoT, explicitly non-authoritative).
+
+2. **P5MSG-02 ExecutionLog reuse (P0-2 unrecorded decision).** P5MSG-02
+   deliberately reuses the *workflow* subsystem's `execution_log` to record
+   message-state audit (logical-UUID, no FK, per the ADR-013 precedent)
+   instead of introducing a message-domain-specific log table. This ADR
+   records that decision: it was chosen to (a) reuse the platform's
+   existing, already-migrated audit/observability table + retention
+   cleanup, (b) keep the message domain decoupled from the workflow
+   runtime per ADR-004/005, and (c) avoid a second, parallel audit sink
+   that would reintroduce the dual-write problem. `execution_type`
+   discriminates domain (`'message_status'` vs `'task'`/`'workflow'`/...)
+   so domains share one table without cross-domain FKs.
+
+**Reason:** Two stores recording the same fact guarantees they will drift
+under a partial failure or a future consumer, and forces every downstream
+audit/metrics reader (Phase 6 Analytics, P6AN-01) to reconcile two sources.
+A single SoT keeps `execution_log` the authoritative trail (as the known-
+issue pool `phase6_data_availability` already assumed) while the deprecated
+JSONB remains readable for legacy rows during a transition window.
+
+**Why keep the JSONB at all (not dropped now):** the `receipts` column and
+`migration 023` already ship and existing rows carry a populated trail.
+Dropping the column / backfilling legacy rows from the log is schema
+churn with no functional need in V1 — legacy rows simply stop receiving
+new entries and the column is read-only until a follow-up migration.
+
+**Follow-up (tech debt, tracked):**
+- Backfill + drop: a migration that (a) backfills `messages.receipts` from
+  the `execution_log` SoT for legacy rows, then (b) drops the column and
+  `idx_messages_last_receipt_at` (or keeps `last_receipt_at` as the
+  denormalized scalar), so only one column family remains. Non-blocking.
+- P1-1 (recorded in-card, not a separate card): the message-domain
+  `channel` value domain (`MESSAGE_CHANNELS`, 10 items) is a hardcoded
+  superset that deviates from the Phase-1 resource-layer single source
+  (`ChannelType` in `private_domain` + `Platform` seeds). The
+  conversation-side half was aligned by P5MSG-D2 (t_8c059295:
+  `ConversationBase.channel` pattern → `MESSAGE_CHANNELS ∪ legacy`).
+  **Deriving the message-domain channel domain from the resource layer is
+  recorded here as a follow-up and is intentionally NOT implemented in this
+  card** (the channel *adapters* that would consume a derived domain are
+  P5MSG-03's completed scope). Phase 6 channel-mix analytics should use the
+  resource-layer domain once derived.
+
+**Acceptance:** P5MSG regression suite green (351 passed; 2 pre-existing
+out-of-scope failures in `test_crm_conversation_integration` = P5MSG-12-
+LEAD-ROUTE Phase-3 gap, unchanged from baseline). `execution_log` is the
+only write path for the message audit trail; `get_receipt` reads from the
+SoT; no test depends on the JSONB being written.
+
+**Source:** P5MSG-10 architecture review P0-1/P0-2 (t_5c4341d4), carried
+forward by P5MSG-12 phase summary (t_09792da5) as P5MSG-12-AR-1; decided +
+implemented by code-architecture-reviewer t_8bd0d6a9, 2026-09-14

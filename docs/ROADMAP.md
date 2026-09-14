@@ -87,6 +87,8 @@
 
 ## Phase 3 — Workflow & Automation
 
+> Status (2026-09-15): Workflow / Scheduler implementation, QA and both reviews complete. E2E QA 72/72 live checks PASS (condition satisfied: seconds-cron P1 t_61bc0556 + create_lead P2 t_52db7696 both done and verified); reliability re-review t_a3f82e43 APPROVED (regression 357/357 + real-Postgres E2E 9/9). Known issues: serial tick low-freq limit (accepted, P2-R6), CORS `*`+credentials (ADR-015, platform-wide security lane), ExecutionLog no-FK (ADR-013, tech debt). Phase summary + test/review reports + known-issue pool: `.cache/phases/phase4-workflow-summary/` (WF-phase-summary.md, WF-test-report.md, WF-review-report.md, wf-known-issues.json). Phase 6 gate t_e94a362e released by t_a3f82e43.
+
 - Workflow model
 - Trigger
 - Condition
@@ -100,7 +102,9 @@
 
 ---
 
-## Phase 4 — CRM
+## Phase 4  CRM
+
+> Status (2026-09-14): Implementation layer 13/14 board tasks done; known open items: prod DB missing 7 CRM tables (follow-up card), frontend base-URL default points at 8000, security/privacy P0s tracked under ADR-011. E2E QA re-run pending. See docs/PHASE-3-SUMMARY.md.
 
 - Customer
 - CustomerIdentity
