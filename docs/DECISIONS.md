@@ -182,13 +182,13 @@ All green alongside the 84-integrity + nurture + content-generation suites.
 
 ## ADR-015  CORS `*` + credentials — Security Follow-up Handoff (P2-5)
 
-**Status:** Accepted - Recorded / Handed to Security Task
+**Status:** Accepted - Implemented (2026-09-15, t_3e806a29 / P6AN-16 [P1] card, P2-4)
 
 **Decision:** `main.py` currently sets `allow_origins=["*"]` together with `allow_credentials=True`. This is a known-insecure CORS combination (star origins with credentialed requests is disallowed/misleading by browser CORS rules) and is flagged as a security hardening item, **not** a change to make in this workflow card.
 
 **Reason:** CORS hardening is out of scope for the Workflow architecture review (its security surface is a dedicated task). Record-only here so it is not lost; a dedicated security task should restrict origins to the deployed frontend and/or drop credentialed wildcard CORS.
 
-**Follow-up (tech debt / security):** Owned by the security-hardening task; do not "fix" casually from the workflow lane.
+**Follow-up (tech debt / security):** Landed by t_3e806a29 (P6AN-16 [P1] card, P2-4): `main.py` CORS moved from the insecure wildcard + credentials combo to an env-driven whitelist (`CORS_ORIGINS`, default the local Vite frontend; `cors_allow_credentials` allows credentials only under a non-wildcard whitelist). See `app/config.py::cors_origins` and `main.py`.
 
 **Source:** Workflow Architecture Review t_c81d72fe P2-5, recorded in t_c94bba06, 2026-09-14
 
@@ -330,3 +330,49 @@ SoT; no test depends on the JSONB being written.
 **Source:** P5MSG-10 architecture review P0-1/P0-2 (t_5c4341d4), carried
 forward by P5MSG-12 phase summary (t_09792da5) as P5MSG-12-AR-1; decided +
 implemented by code-architecture-reviewer t_8bd0d6a9, 2026-09-14
+
+---
+
+## ADR-018  Analytics API 表面认证 + 租户隔离（P6AN P1-1）
+
+**Status:** Accepted - Implemented (2026-09-15, t_3e806a29 / P6AN-16 [P1])
+
+**Decision:** The full `/api/v1/analytics/*` surface (5 routers: analytics /
+dashboard / agent_performance / private_domain_conversion / roi_analysis,
+35 endpoints, read + CRUD) is now authenticated and tenant-scoped:
+
+1. **Auth** — every endpoint reuses the ADR-011 `get_current_principal`
+   (HS256 Bearer). Two new guards in `app/security/analytics_access.py`:
+   `require_analytics_read` (read endpoints, minimum read role) and
+   `require_analytics_write` (CRUD, minimum write role). Missing / invalid /
+   expired token → 401; role below the analytics floor → 403.
+2. **Tenant scoping (reads)** — overview / funnel / conversations / leads /
+   agents / roi / private-domain reads are scoped to the caller token's
+   `account_id` (via `agent_persona_binding → agent_customer_binding`
+   customer/agent dimensions + account-owned source tables). `account_id=NULL`
+   platform-wide definitions are only visible to `PLATFORM_WIDE_ROLES`
+   (admin / platform_admin); an unbound operator attempting a platform-wide
+   read → 403. The P1 cross-tenant read path is closed at the guard layer,
+   not merely the service layer.
+3. **CRUD ownership** — create forces ownership to the caller's account
+   (client-supplied `account_id` is never trusted); cross-tenant write raises
+   `AccountOwnershipError` → global 403 handler in `main.py`; cross-tenant
+   read degrades to 404 (does not leak account existence).
+4. **Cache** — the dashboard overview response-cache key now includes the
+   tenant (`account_id`); cross-tenant cache aliases are impossible.
+
+**Reason:** P6AN-16 architecture review (t_67f18134) found the analytics
+surface unauthenticated with no tenant isolation (P1-1): reads exposed
+cross-tenant business BI; CRUD's free `account_id` body field allowed
+writing any account's definitions. Platform-wide.
+
+**Follow-up:** P2-4 (CORS `*` + credentials) was fixed in the same card —
+`main.py` CORS is now env-driven whitelist (`CORS_ORIGINS`, default local
+Vite; credentials only under a non-wildcard whitelist), superseding the open
+security follow-up recorded in ADR-015. Remaining P2 items (P2-1 caliber,
+P2-2 hotspot, P2-3 time DDL, P2-5 prod DB drift) are tracked as P2 follow-up
+cards (P6AN-17), not this ADR.
+
+**Source:** P6AN-16 architecture review t_67f18134 P1-1, decided by
+project-orchestrator t_adcbbb97, implemented by backend-engineer
+t_3e806a29, 2026-09-15

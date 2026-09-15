@@ -221,6 +221,8 @@ Customer
 
 ### Phase 6 — Analytics
 
+> Status (2026-09-15): Phase 6 Analytics & Optimization complete (9 backend + 3 frontend cards). E2E QA P6AN-15 verdict PASS; architecture review P6AN-16 verdict CHANGES_REQUIRED (no P0; P1 analytics-surface auth/tenant isolation FIXED in t_3e806a29 = ADR-018, with P2-4 CORS whitelist; P2-1/2/3/5 filed as P2 follow-up cards P6AN-17). See docs/PHASE-6-SUMMARY.md.
+
 - Dashboard
 - Conversion
 - ROI

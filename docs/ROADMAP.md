@@ -132,6 +132,8 @@
 
 ## Phase 6 — Analytics & Optimization
 
+> Status (2026-09-15): Phase 6 Analytics & Optimization implementation (9 backend + 3 frontend cards), QA and architecture review complete. E2E QA (P6AN-15, t_31ca8734) verdict PASS (main chain DB→API→UI all green, no P0/P1 leftover). Architecture review (P6AN-16, t_67f18134) verdict CHANGES_REQUIRED: no P0; single P1 (analytics surface unauthenticated + no tenant isolation) FIXED in t_3e806a29 (ADR-018, including P2-4 CORS whitelist); 5 P2 items — P2-1 caliber, P2-2 router hotspot, P2-3 naive/tz DDL, P2-5 prod-DB drift filed as P2 follow-up cards (P6AN-17), P2-4 closed with the P1 card. Regression 272/275 (2 pre-existing shared-test-DB drift + 1 pre-existing test-route harness nit, both filed: t_dc92c614 DEF-3 P2 / t_645352c1 DEF-8 P3, in flight). Phase summary: `docs/PHASE-6-SUMMARY.md`.
+
 - Dashboard
 - Acquisition funnel
 - Conversation metrics
