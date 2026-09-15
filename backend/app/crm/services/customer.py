@@ -3,7 +3,7 @@ Customer Service: Full CRUD + Identity Management
 基于 SQLAlchemy ORM
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
@@ -225,7 +225,8 @@ async def update_customer(db: AsyncSession, customer_id: UUID, updates: dict) ->
         if key in updatable_fields and value is not None:
             setattr(customer, key, value)
     
-    customer.updated_at = datetime.utcnow()
+    # P6AN-17 P2-3: aware-UTC timestamptz write (customer columns are timestamptz).
+    customer.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(customer)
     
@@ -382,7 +383,7 @@ async def update_customer_identity(
         if key in updatable_fields and value is not None:
             setattr(identity, key, value)
     
-    identity.updated_at = datetime.utcnow()
+    identity.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(identity)
     
@@ -523,7 +524,7 @@ async def merge_customers(
     
     # 标记源客户为已删除
     source_customer.is_deleted = True
-    source_customer.updated_at = datetime.utcnow()
+    source_customer.updated_at = datetime.now(timezone.utc)
     
     await db.commit()
     

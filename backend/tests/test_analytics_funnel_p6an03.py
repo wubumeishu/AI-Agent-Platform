@@ -16,7 +16,7 @@ Covers:
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -80,15 +80,16 @@ class TestDateParsing:
 
     def test_date_only_naive(self):
         d = _parse_date("2026-09-01")
-        assert d == datetime(2026, 9, 1) and d.tzinfo is None
+        # P6AN-17 P2-3: bounds are now aware-UTC (Lead.created_at is timestamptz).
+        assert d == datetime(2026, 9, 1, tzinfo=timezone.utc) and d.tzinfo is not None
 
-    def test_zulu_to_naive_utc(self):
+    def test_zulu_to_aware_utc(self):
         d = _parse_date("2026-09-01T12:00:00Z")
-        assert d == datetime(2026, 9, 1, 12, 0, 0) and d.tzinfo is None
+        assert d == datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-    def test_offset_normalizes_to_naive_utc(self):
+    def test_offset_normalizes_to_aware_utc(self):
         d = _parse_date("2026-09-01T15:00:00+03:00")
-        assert d == datetime(2026, 9, 1, 12, 0, 0)  # 15:00+03 == 12:00Z
+        assert d == datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)  # 15:00+03 == 12:00Z
 
 
 class TestReachedMath:
@@ -252,8 +253,9 @@ class TestComputeFunnel:
     async def test_time_window_applied(self):
         db = _FakeSession(status_counts={"new": 10})
         res = await _run(db, from_date="2026-08-01", to_date="2026-09-01")
-        assert res["filters"]["from"] == "2026-08-01T00:00:00"
-        assert res["filters"]["to"] == "2026-09-01T00:00:00"
+        # P6AN-17 P2-3: bounds are now aware-UTC; the filters echo carries the +00:00 offset.
+        assert res["filters"]["from"] == "2026-08-01T00:00:00+00:00"
+        assert res["filters"]["to"] == "2026-09-01T00:00:00+00:00"
 
     async def test_custom_funnel_uses_step_rows(self):
         steps = [
@@ -272,6 +274,11 @@ class TestComputeFunnel:
 def _funnel_app() -> FastAPI:
     app = FastAPI(title="P6AN-03 funnel-only app")
     app.include_router(analytics_router)
+    # P6AN-16: the analytics surface now requires an authenticated principal.
+    # Functional tests exercise funnel behavior with a platform-wide admin
+    # principal (no tenant scoping) to preserve the legacy unscoped semantics.
+    from app.security.analytics_access import override_analytics_auth, test_principal
+    override_analytics_auth(app, test_principal(role="admin"))
     return app
 
 
@@ -283,7 +290,11 @@ def _wire(app, db):
 
 class TestFunnelApi:
     def test_route_registered(self):
-        paths = {getattr(r, "path", "") for r in _funnel_app().routes}
+        # P6AN-15-D8 / P6AN-17 P2-3: assert via the version-stable OpenAPI
+        # contract rather than a raw ``app.routes`` scan. FastAPI 0.141 wraps
+        # included routers in an internal ``_IncludedRouter`` (no ``.path``
+        # attribute), so the raw scan no longer sees the leaf routes.
+        paths = set(_funnel_app().openapi()["paths"])
         assert "/api/v1/analytics/funnel" in paths
 
     def test_empty_scope_200(self):

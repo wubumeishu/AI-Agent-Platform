@@ -56,3 +56,24 @@ immediately; that file is not committed.
 ## Verification
 `tests/test_db_dsn.py` asserts the pure DSN-resolution + redaction behavior
 **without** needing Postgres, so it stays green in any environment.
+
+## Timezone convention (ADR-019 — P6AN-17 P2-3)
+
+The DSN's target PostgreSQL instance runs session/role `TimeZone =
+Asia/Tokyo (JST)`, **not UTC**. This is load-bearing for every time column:
+
+- **All time columns are aware-UTC `timestamptz`.** ORM columns use
+  `DateTime(timezone=True)` with a `datetime.now(timezone.utc)` default.
+  `datetime.utcnow()` (naive) is **forbidden** — a naive value written into a
+  `timestamptz` column is re-interpreted in the session tz (JST here), a
+  silent ±9h drift.
+- **Query bounds are aware-UTC and bind directly** to `timestamptz` columns as
+  absolute instants. No per-table `_naive_utc` stripping.
+- **Column type changes must use `ALTER ... TYPE timestamptz USING
+  (col AT TIME ZONE 'UTC')`.** A bare `CAST`/`ALTER TYPE` reinterprets the
+  stored naive value in the session tz → −9h drift on this server.
+
+Migration `032_unify_source_time_tz` unified the last six naive source tables
+(lead / customer / customer_identity / lifecycle_stage / lifecycle_stage_log
+/ tag, 10 columns) and is idempotent / re-runnable (re-type fires only while a
+column is still naive). See ADR-019 in `docs/DECISIONS.md`.

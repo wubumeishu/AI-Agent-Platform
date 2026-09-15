@@ -120,18 +120,19 @@ def _parse_range_days(range_value: Optional[str]) -> Optional[int]:
 
 
 def _parse_date(value: Optional[str]) -> Optional[datetime]:
-    """Parse an ISO-8601 (or date-only) string to a naive-UTC datetime.
+    """Parse an ISO-8601 (or date-only) string to an **aware-UTC** datetime.
 
-    ``Lead.created_at`` is a naive-UTC column (``datetime.utcnow`` default),
-    so the bounds are kept naive-UTC to stay comparable in the DB without a
-    timezone-cast failure.
+    ``Lead.created_at`` is an aware-UTC ``timestamptz`` column (P6AN-17
+    P2-3), so the bounds are kept aware-UTC and bind directly to it as an
+    absolute instant — no naive stripping (a naive bound is session-tz
+    dependent and would mis-window under a non-UTC server timezone).
     """
     if not value:
         return None
     dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _stages_from_funnel_steps(steps: List[Any]) -> List[_Stage]:
@@ -155,7 +156,8 @@ def _stages_from_funnel_steps(steps: List[Any]) -> List[_Stage]:
     return stages
 
 
-async def _load_stages(db: AsyncSession, funnel_code: Optional[str]) -> List[_Stage]:
+async def _load_stages(db: AsyncSession, funnel_code: Optional[str],
+                       account_id: Optional[UUID] = None) -> List[_Stage]:
     """Resolve the ordered stage list for a request.
 
     * ``funnel_code`` is None / the default code -> the built-in acquisition
@@ -163,32 +165,51 @@ async def _load_stages(db: AsyncSession, funnel_code: Optional[str]) -> List[_St
     * a registered custom code -> its live ``funnel_step`` rows in ``seq``
       order. If none are registered, fall back to the built-in stages so the
       endpoint still returns a well-formed (default) funnel instead of 500.
+
+    P6AN-16: when ``account_id`` (the caller's tenant) is set, a custom
+    funnel's step catalog is restricted to the definitions the tenant may
+    see: its own account's steps or shared platform-wide (NULL) steps. A
+    tenant can never load another tenant's custom funnel catalog.
     """
     code = funnel_code or DEFAULT_FUNNEL_CODE
     if funnel_code is None or funnel_code == DEFAULT_FUNNEL_CODE:
         return [_Stage(key=k, name=n, status=k) for k, n in ACQUISITION_STAGES]
-    rows = (
-        await db.execute(
-            select(FunnelStep)
-            .where(
-                FunnelStep.funnel_code == code,
-                FunnelStep.is_deleted == False,  # noqa: E712
-            )
-            .order_by(FunnelStep.seq.asc())
+    step_q = (
+        select(FunnelStep)
+        .where(
+            FunnelStep.funnel_code == code,
+            FunnelStep.is_deleted == False,  # noqa: E712
         )
-    ).scalars().all()
+        .order_by(FunnelStep.seq.asc())
+    )
+    if account_id is not None:
+        from sqlalchemy import or_
+
+        step_q = step_q.where(
+            or_(
+                FunnelStep.account_id == account_id,
+                FunnelStep.account_id.is_(None),
+            )
+        )
+    rows = (await db.execute(step_q)).scalars().all()
     stages = _stages_from_funnel_steps(list(rows))
     return stages or [_Stage(key=k, name=n, status=k) for k, n in ACQUISITION_STAGES]
 
 
-def _lead_customer_subquery(agent_id: Optional[UUID], platform_id: Optional[UUID]):
+def _lead_customer_subquery(agent_id: Optional[UUID], platform_id: Optional[UUID],
+                            account_id: Optional[UUID] = None):
     """Return a scalar subquery of in-scope customer ids, or None (all).
 
     Both filters compose onto the same ``agent_customer_binding`` row set:
     agent -> that agent's bindings; platform -> bindings of agents that
     operate under an account of the platform. ANDed when both are supplied.
+
+    P6AN-16: ``account_id`` (the caller's tenant, from the token) further
+    restricts the agent dimension to the tenant's own agents, so a tenant
+    can never read another tenant's funnel. ``None`` = unscoped (platform-
+    wide actor, elevated role).
     """
-    if agent_id is None and platform_id is None:
+    if agent_id is None and platform_id is None and account_id is None:
         return None
 
     preds: List[Any] = []
@@ -207,12 +228,19 @@ def _lead_customer_subquery(agent_id: Optional[UUID], platform_id: Optional[UUID
             )
         )
         preds.append(AgentCustomerBinding.agent_id.in_(platform_agents))
+    if account_id is not None:
+        from app.security.analytics_access import tenant_agent_subquery
+
+        preds.append(
+            AgentCustomerBinding.agent_id.in_(tenant_agent_subquery(account_id))
+        )
     preds.append(AgentCustomerBinding.is_deleted == False)  # noqa: E712
     return select(AgentCustomerBinding.customer_id).where(and_(*preds))
 
 
 async def _count_reached_by_stage(
-    db: AsyncSession, ctx: _FunnelCtx, agent_id: Optional[UUID], platform_id: Optional[UUID]
+    db: AsyncSession, ctx: _FunnelCtx, agent_id: Optional[UUID], platform_id: Optional[UUID],
+    account_id: Optional[UUID] = None,
 ) -> Dict[str, int]:
     """Single GROUP BY over in-scope live leads -> "reached" count per stage.
 
@@ -222,7 +250,7 @@ async def _count_reached_by_stage(
     q = select(Lead.status, func.count(Lead.id)).where(
         Lead.is_deleted == False  # noqa: E712
     )
-    cust = _lead_customer_subquery(agent_id, platform_id)
+    cust = _lead_customer_subquery(agent_id, platform_id, account_id)
     if cust is not None:
         q = q.where(Lead.customer_id.in_(cust))
     if ctx.start is not None:
@@ -272,6 +300,7 @@ async def compute_funnel(
     *,
     agent_id: Optional[UUID] = None,
     platform_id: Optional[UUID] = None,
+    account_id: Optional[UUID] = None,
     range: Optional[str] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
@@ -293,9 +322,9 @@ async def compute_funnel(
     start = _parse_date(from_date)
     end = _parse_date(to_date)
     if start is None and days is not None:
-        start = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        start = datetime.now(timezone.utc) - timedelta(days=days)
 
-    stages = await _load_stages(db, funnel_code)
+    stages = await _load_stages(db, funnel_code, account_id)
     code = funnel_code or DEFAULT_FUNNEL_CODE
     ctx = _FunnelCtx(
         stages=stages,
@@ -303,6 +332,7 @@ async def compute_funnel(
         filters={
             "agent_id": str(agent_id) if agent_id else None,
             "platform_id": str(platform_id) if platform_id else None,
+            "account_id": str(account_id) if account_id else None,
             "range": range or DEFAULT_RANGE,
             "from": start.isoformat() if start else None,
             "to": end.isoformat() if end else None,
@@ -310,7 +340,7 @@ async def compute_funnel(
         start=start,
         end=end,
     )
-    reached = await _count_reached_by_stage(db, ctx, agent_id, platform_id)
+    reached = await _count_reached_by_stage(db, ctx, agent_id, platform_id, account_id)
     return _assemble(ctx, reached)
 
 

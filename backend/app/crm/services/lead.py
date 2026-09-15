@@ -4,7 +4,7 @@ Lead Service: CRUD + Conversation Integration
 基于 SQLAlchemy ORM
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
@@ -296,7 +296,8 @@ async def update_lead(db: AsyncSession, lead_id: UUID, updates: dict) -> Optiona
         if key in updatable_fields and value is not None:
             setattr(lead, key, value)
 
-    lead.updated_at = datetime.utcnow()
+    # P6AN-17 P2-3: aware-UTC timestamptz write (lead columns are timestamptz).
+    lead.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(lead)
 

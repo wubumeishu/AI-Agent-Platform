@@ -241,6 +241,12 @@ class TestSummarizeResults:
 def _analytics_app() -> FastAPI:
     app = FastAPI(title="P6AN-08 analytics-only app")
     app.include_router(analytics_router)
+    # P6AN-16: the analytics surface now requires an authenticated principal.
+    # Functional tests exercise experiment-result behavior with a platform-wide
+    # admin principal (no tenant scoping) to preserve the legacy unscoped
+    # semantics under test.
+    from app.security.analytics_access import override_analytics_auth, test_principal
+    override_analytics_auth(app, test_principal(role="admin"))
     return app
 
 

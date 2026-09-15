@@ -51,6 +51,12 @@ from app.schemas.analytics import (
     MetricDefinitionCreate,
     MetricDefinitionUpdate,
 )
+from app.security.analytics_access import (
+    assert_account_owns,
+    list_account_predicates,
+    resolve_create_account,
+)
+from app.security.jwt_auth import PrivateDomainPrincipal
 
 logger = logging.getLogger(__name__)
 
@@ -97,12 +103,16 @@ async def _select_one(db: AsyncSession, model: type, where: Any) -> Any:
 # ========== DashboardWidgetService ==========
 
 class DashboardWidgetService:
-    """CRUD for dashboard widget definitions."""
+    """CRUD for dashboard widget definitions (per-tenant scoped, P6AN-16)."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create(self, data: DashboardWidgetCreate) -> DashboardWidget:
+    async def create(self, data: DashboardWidgetCreate,
+                    principal: Optional[PrivateDomainPrincipal] = None) -> DashboardWidget:
+        # P6AN-16: ownership is forced to the caller's account; the client-supplied
+        # account_id is never trusted (a tenant cannot create platform-wide rows).
+        account_id = resolve_create_account(data.account_id, principal, "dashboard_widget") if principal else data.account_id
         widget = DashboardWidget(
             name=data.name,
             description=data.description,
@@ -113,7 +123,7 @@ class DashboardWidgetService:
             refresh_interval_seconds=data.refresh_interval_seconds,
             position=data.position,
             enabled=data.enabled,
-            account_id=data.account_id,
+            account_id=account_id,
         )
         self.db.add(widget)
         await self.db.commit()
@@ -121,19 +131,27 @@ class DashboardWidgetService:
         logger.info("Created dashboard widget %s (%s)", widget.id, widget.name)
         return widget
 
-    async def get(self, widget_id: UUID) -> Optional[DashboardWidget]:
-        return await _select_one(
-            self.db, DashboardWidget, [DashboardWidget.id == widget_id]
-        )
+    async def get(self, widget_id: UUID,
+                  principal: Optional[PrivateDomainPrincipal] = None) -> Optional[DashboardWidget]:
+        # P6AN-16: with a principal, only definitions the caller may access are
+        # visible (tenant sees its account's; an elevated tenant role also sees
+        # platform-wide NULL rows) — cross-tenant ids are 404, not 403.
+        where = [DashboardWidget.id == widget_id]
+        if principal is not None:
+            where += list_account_predicates(DashboardWidget, principal)
+        return await _select_one(self.db, DashboardWidget, where)
 
     async def list(self, widget_type: Optional[str] = None,
                    enabled: Optional[bool] = None,
-                   page: int = 1, page_size: int = 20) -> Tuple[List[DashboardWidget], int]:
+                   page: int = 1, page_size: int = 20,
+                   principal: Optional[PrivateDomainPrincipal] = None) -> Tuple[List[DashboardWidget], int]:
         q = select(DashboardWidget).where(DashboardWidget.is_deleted == False)  # noqa: E712
         if widget_type:
             q = q.where(DashboardWidget.widget_type == widget_type)
         if enabled is not None:
             q = q.where(DashboardWidget.enabled == enabled)
+        if principal is not None:
+            q = q.where(*list_account_predicates(DashboardWidget, principal))
         total = len((await self.db.execute(q)).scalars().all())
         page_q = (
             q.order_by(DashboardWidget.position, DashboardWidget.created_at)
@@ -144,7 +162,11 @@ class DashboardWidgetService:
         return items, total
 
     async def update(self, widget: DashboardWidget,
-                     data: DashboardWidgetUpdate) -> DashboardWidget:
+                     data: DashboardWidgetUpdate,
+                     principal: Optional[PrivateDomainPrincipal] = None) -> DashboardWidget:
+        if principal is not None:
+            # P6AN-16: re-assert ownership before mutating (cross-account -> 403).
+            assert_account_owns(widget.account_id, principal, "dashboard_widget")
         if data.name is not None:
             widget.name = data.name
         if data.description is not None:
@@ -167,8 +189,9 @@ class DashboardWidgetService:
         await self.db.refresh(widget)
         return widget
 
-    async def delete(self, widget_id: UUID) -> bool:
-        widget = await self.get(widget_id)
+    async def delete(self, widget_id: UUID,
+                    principal: Optional[PrivateDomainPrincipal] = None) -> bool:
+        widget = await self.get(widget_id, principal)
         if widget is None:
             return False
         widget.is_deleted = True
@@ -180,12 +203,18 @@ class DashboardWidgetService:
 # ========== FunnelStepService ==========
 
 class FunnelStepService:
-    """CRUD for funnel step definitions (seq unique per funnel among live rows)."""
+    """CRUD for funnel step definitions (seq unique per funnel among live rows).
+
+    P6AN-16: per-tenant scoped — ownership forced on create, and only the
+    caller's account's steps are visible to get/update/delete.
+    """
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create(self, data: FunnelStepCreate) -> FunnelStep:
+    async def create(self, data: FunnelStepCreate,
+                    principal: Optional[PrivateDomainPrincipal] = None) -> FunnelStep:
+        account_id = resolve_create_account(data.account_id, principal, "funnel_step") if principal else data.account_id
         step = FunnelStep(
             funnel_code=data.funnel_code,
             name=data.name,
@@ -194,7 +223,7 @@ class FunnelStepService:
             entry_criteria=data.entry_criteria or {},
             conversion_criteria=data.conversion_criteria,
             config=data.config or {},
-            account_id=data.account_id,
+            account_id=account_id,
         )
         self.db.add(step)
         try:
@@ -209,16 +238,21 @@ class FunnelStepService:
         logger.info("Created funnel step %s (%s, seq=%s)", step.id, step.funnel_code, step.seq)
         return step
 
-    async def get(self, step_id: UUID) -> Optional[FunnelStep]:
-        return await _select_one(
-            self.db, FunnelStep, [FunnelStep.id == step_id]
-        )
+    async def get(self, step_id: UUID,
+                  principal: Optional[PrivateDomainPrincipal] = None) -> Optional[FunnelStep]:
+        where = [FunnelStep.id == step_id]
+        if principal is not None:
+            where += list_account_predicates(FunnelStep, principal)
+        return await _select_one(self.db, FunnelStep, where)
 
     async def list(self, funnel_code: Optional[str] = None,
-                   page: int = 1, page_size: int = 20) -> Tuple[List[FunnelStep], int]:
+                   page: int = 1, page_size: int = 20,
+                   principal: Optional[PrivateDomainPrincipal] = None) -> Tuple[List[FunnelStep], int]:
         q = select(FunnelStep).where(FunnelStep.is_deleted == False)  # noqa: E712
         if funnel_code:
             q = q.where(FunnelStep.funnel_code == funnel_code)
+        if principal is not None:
+            q = q.where(*list_account_predicates(FunnelStep, principal))
         total = len((await self.db.execute(q)).scalars().all())
         page_q = (
             q.order_by(FunnelStep.funnel_code, FunnelStep.seq)
@@ -228,7 +262,10 @@ class FunnelStepService:
         items = list((await self.db.execute(page_q)).scalars().all())
         return items, total
 
-    async def update(self, step: FunnelStep, data: FunnelStepUpdate) -> FunnelStep:
+    async def update(self, step: FunnelStep, data: FunnelStepUpdate,
+                     principal: Optional[PrivateDomainPrincipal] = None) -> FunnelStep:
+        if principal is not None:
+            assert_account_owns(step.account_id, principal, "funnel_step")
         if data.name is not None:
             step.name = data.name
         if data.description is not None:
@@ -251,8 +288,9 @@ class FunnelStepService:
         await self.db.refresh(step)
         return step
 
-    async def delete(self, step_id: UUID) -> bool:
-        step = await self.get(step_id)
+    async def delete(self, step_id: UUID,
+                    principal: Optional[PrivateDomainPrincipal] = None) -> bool:
+        step = await self.get(step_id, principal)
         if step is None:
             return False
         step.is_deleted = True
@@ -269,7 +307,9 @@ class MetricDefinitionService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create(self, data: MetricDefinitionCreate) -> MetricDefinition:
+    async def create(self, data: MetricDefinitionCreate,
+                    principal: Optional[PrivateDomainPrincipal] = None) -> MetricDefinition:
+        account_id = resolve_create_account(data.account_id, principal, "metric_definition") if principal else data.account_id
         metric = MetricDefinition(
             code=data.code,
             name=data.name,
@@ -282,7 +322,7 @@ class MetricDefinitionService:
             source=data.source,
             window_days=data.window_days,
             enabled=data.enabled,
-            account_id=data.account_id,
+            account_id=account_id,
         )
         self.db.add(metric)
         try:
@@ -296,24 +336,31 @@ class MetricDefinitionService:
         logger.info("Created metric definition %s (%s)", metric.id, metric.code)
         return metric
 
-    async def get(self, metric_id: UUID) -> Optional[MetricDefinition]:
-        return await _select_one(
-            self.db, MetricDefinition, [MetricDefinition.id == metric_id]
-        )
+    async def get(self, metric_id: UUID,
+                  principal: Optional[PrivateDomainPrincipal] = None) -> Optional[MetricDefinition]:
+        where = [MetricDefinition.id == metric_id]
+        if principal is not None:
+            where += list_account_predicates(MetricDefinition, principal)
+        return await _select_one(self.db, MetricDefinition, where)
 
-    async def get_by_code(self, code: str) -> Optional[MetricDefinition]:
-        return await _select_one(
-            self.db, MetricDefinition, [MetricDefinition.code == code]
-        )
+    async def get_by_code(self, code: str,
+                          principal: Optional[PrivateDomainPrincipal] = None) -> Optional[MetricDefinition]:
+        where = [MetricDefinition.code == code]
+        if principal is not None:
+            where += list_account_predicates(MetricDefinition, principal)
+        return await _select_one(self.db, MetricDefinition, where)
 
     async def list(self, category: Optional[str] = None,
                    enabled: Optional[bool] = None,
-                   page: int = 1, page_size: int = 20) -> Tuple[List[MetricDefinition], int]:
+                   page: int = 1, page_size: int = 20,
+                   principal: Optional[PrivateDomainPrincipal] = None) -> Tuple[List[MetricDefinition], int]:
         q = select(MetricDefinition).where(MetricDefinition.is_deleted == False)  # noqa: E712
         if category:
             q = q.where(MetricDefinition.category == category)
         if enabled is not None:
             q = q.where(MetricDefinition.enabled == enabled)
+        if principal is not None:
+            q = q.where(*list_account_predicates(MetricDefinition, principal))
         total = len((await self.db.execute(q)).scalars().all())
         page_q = (
             q.order_by(MetricDefinition.code)
@@ -324,7 +371,10 @@ class MetricDefinitionService:
         return items, total
 
     async def update(self, metric: MetricDefinition,
-                     data: MetricDefinitionUpdate) -> MetricDefinition:
+                     data: MetricDefinitionUpdate,
+                     principal: Optional[PrivateDomainPrincipal] = None) -> MetricDefinition:
+        if principal is not None:
+            assert_account_owns(metric.account_id, principal, "metric_definition")
         if data.name is not None:
             metric.name = data.name
         if data.description is not None:
@@ -349,8 +399,9 @@ class MetricDefinitionService:
         await self.db.refresh(metric)
         return metric
 
-    async def delete(self, metric_id: UUID) -> bool:
-        metric = await self.get(metric_id)
+    async def delete(self, metric_id: UUID,
+                    principal: Optional[PrivateDomainPrincipal] = None) -> bool:
+        metric = await self.get(metric_id, principal)
         if metric is None:
             return False
         metric.is_deleted = True
@@ -467,8 +518,10 @@ class ExperimentService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create(self, data: ExperimentCreate) -> Experiment:
+    async def create(self, data: ExperimentCreate,
+                    principal: Optional[PrivateDomainPrincipal] = None) -> Experiment:
         variants = _validate_variants(data.variants or [])
+        account_id = resolve_create_account(data.account_id, principal, "experiment") if principal else data.account_id
         exp = Experiment(
             code=data.code,
             name=data.name,
@@ -479,7 +532,7 @@ class ExperimentService:
             variants=variants,
             status="draft",
             owner=data.owner,
-            account_id=data.account_id,
+            account_id=account_id,
         )
         self.db.add(exp)
         try:
@@ -493,21 +546,28 @@ class ExperimentService:
         logger.info("Created experiment %s (%s)", exp.id, exp.code)
         return exp
 
-    async def get(self, experiment_id: UUID) -> Optional[Experiment]:
-        return await _select_one(
-            self.db, Experiment, [Experiment.id == experiment_id]
-        )
+    async def get(self, experiment_id: UUID,
+                  principal: Optional[PrivateDomainPrincipal] = None) -> Optional[Experiment]:
+        where = [Experiment.id == experiment_id]
+        if principal is not None:
+            where += list_account_predicates(Experiment, principal)
+        return await _select_one(self.db, Experiment, where)
 
-    async def get_by_code(self, code: str) -> Optional[Experiment]:
-        return await _select_one(
-            self.db, Experiment, [Experiment.code == code]
-        )
+    async def get_by_code(self, code: str,
+                          principal: Optional[PrivateDomainPrincipal] = None) -> Optional[Experiment]:
+        where = [Experiment.code == code]
+        if principal is not None:
+            where += list_account_predicates(Experiment, principal)
+        return await _select_one(self.db, Experiment, where)
 
     async def list(self, status: Optional[str] = None,
-                   page: int = 1, page_size: int = 20) -> Tuple[List[Experiment], int]:
+                   page: int = 1, page_size: int = 20,
+                   principal: Optional[PrivateDomainPrincipal] = None) -> Tuple[List[Experiment], int]:
         q = select(Experiment).where(Experiment.is_deleted == False)  # noqa: E712
         if status:
             q = q.where(Experiment.status == status)
+        if principal is not None:
+            q = q.where(*list_account_predicates(Experiment, principal))
         total = len((await self.db.execute(q)).scalars().all())
         page_q = (
             q.order_by(Experiment.created_at.desc())
@@ -517,7 +577,10 @@ class ExperimentService:
         items = list((await self.db.execute(page_q)).scalars().all())
         return items, total
 
-    async def update(self, exp: Experiment, data: ExperimentUpdate) -> Experiment:
+    async def update(self, exp: Experiment, data: ExperimentUpdate,
+                     principal: Optional[PrivateDomainPrincipal] = None) -> Experiment:
+        if principal is not None:
+            assert_account_owns(exp.account_id, principal, "experiment")
         if data.name is not None:
             exp.name = data.name
         if data.description is not None:
@@ -537,8 +600,11 @@ class ExperimentService:
         return exp
 
     async def set_status(self, exp: Experiment,
-                         data: ExperimentStatusUpdate) -> Experiment:
+                         data: ExperimentStatusUpdate,
+                         principal: Optional[PrivateDomainPrincipal] = None) -> Experiment:
         """Apply the experiment state machine (``EXPERIMENT_TRANSITIONS``)."""
+        if principal is not None:
+            assert_account_owns(exp.account_id, principal, "experiment")
         current = exp.status
         allowed = EXPERIMENT_TRANSITIONS.get(current, frozenset())
         if data.status not in allowed:
@@ -567,8 +633,9 @@ class ExperimentService:
         )
         return exp
 
-    async def delete(self, experiment_id: UUID) -> bool:
-        exp = await self.get(experiment_id)
+    async def delete(self, experiment_id: UUID,
+                    principal: Optional[PrivateDomainPrincipal] = None) -> bool:
+        exp = await self.get(experiment_id, principal)
         if exp is None:
             return False
         exp.is_deleted = True
@@ -578,9 +645,11 @@ class ExperimentService:
 
     # ----- results -----
 
-    async def add_result(self, data: ExperimentResultCreate) -> ExperimentResult:
-        exp = await self.get(data.experiment_id)
+    async def add_result(self, data: ExperimentResultCreate,
+                         principal: Optional[PrivateDomainPrincipal] = None) -> ExperimentResult:
+        exp = await self.get(data.experiment_id, principal)
         if exp is None:
+            # Cross-tenant / unknown experiment is a 404 source (not a 403 leak).
             raise AnalyticsEntityNotFoundError("Experiment", data.experiment_id)
         # Results may only be recorded for live experiments.
         result = ExperimentResult(
@@ -608,8 +677,11 @@ class ExperimentService:
     async def list_results(self, experiment_id: UUID,
                            variant_label: Optional[str] = None,
                            metric_code: Optional[str] = None,
-                           page: int = 1, page_size: int = 20
+                           page: int = 1, page_size: int = 20,
+                           principal: Optional[PrivateDomainPrincipal] = None
                            ) -> Tuple[List[ExperimentResult], int]:
+        # Results are gated by their experiment's visibility (the router
+        # resolves the experiment with the principal before calling this).
         q = select(ExperimentResult).where(
             ExperimentResult.experiment_id == experiment_id
         )
@@ -627,7 +699,15 @@ class ExperimentService:
         return items, total
 
     async def update_result(self, result: ExperimentResult,
-                            data: ExperimentResultUpdate) -> ExperimentResult:
+                            data: ExperimentResultUpdate,
+                            principal: Optional[PrivateDomainPrincipal] = None) -> ExperimentResult:
+        if principal is not None:
+            # A result is visible/mutable only through its owning experiment's
+            # visibility, so re-resolve the experiment with the principal.
+            exp = await self.get(result.experiment_id, principal)
+            if exp is None:
+                raise AnalyticsEntityNotFoundError("Experiment", result.experiment_id)
+            assert_account_owns(exp.account_id, principal, "experiment_result")
         if data.sample_size is not None:
             result.sample_size = data.sample_size
         if data.metric_value is not None:
@@ -648,14 +728,23 @@ class ExperimentService:
         await self.db.refresh(result)
         return result
 
-    async def get_result(self, result_id: UUID) -> Optional[ExperimentResult]:
+    async def get_result(self, result_id: UUID,
+                         principal: Optional[PrivateDomainPrincipal] = None) -> Optional[ExperimentResult]:
         res = await self.db.execute(
             select(ExperimentResult).where(ExperimentResult.id == result_id)
         )
-        return res.scalar_one_or_none()
+        found = res.scalar_one_or_none()
+        if found is None or principal is None:
+            return found
+        # P6AN-16: a result is visible only through its owning experiment's
+        # visibility — drop results whose experiment is out of the caller's
+        # tenancy (cross-tenant -> None -> 404, not a 403 leak).
+        exp = await self.get(found.experiment_id, principal)
+        return found if exp is not None else None
 
-    async def delete_result(self, result_id: UUID) -> bool:
-        result = await self.get_result(result_id)
+    async def delete_result(self, result_id: UUID,
+                            principal: Optional[PrivateDomainPrincipal] = None) -> bool:
+        result = await self.get_result(result_id, principal)
         if result is None:
             return False
         await self.db.delete(result)
@@ -704,7 +793,8 @@ class ExperimentService:
         return detail
 
     async def summarize_results(
-        self, experiment_id: UUID, significance_threshold: float = 0.05
+        self, experiment_id: UUID, significance_threshold: float = 0.05,
+        principal: Optional[PrivateDomainPrincipal] = None,
     ) -> ExperimentResultSummaryResponse:
         """P6AN-08: per-metric variant comparison for one experiment.
 
@@ -712,9 +802,10 @@ class ExperimentService:
         a derived lift against the resolved baseline variant, and writes a
         plain-language significance note. Basic comparison only — no
         statistical-inference library (explicitly out of scope for this
-        card).
+        card). P6AN-16: gated to the caller's tenancy via the owning
+        experiment's visibility.
         """
-        exp = await self.get(experiment_id)
+        exp = await self.get(experiment_id, principal)
         if exp is None:
             raise AnalyticsEntityNotFoundError("Experiment", experiment_id)
 

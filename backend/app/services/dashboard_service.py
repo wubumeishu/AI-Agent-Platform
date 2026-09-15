@@ -32,13 +32,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.agent import Agent, AgentCustomerBinding
 from app.db.models.conversation import Conversation
 from app.db.models.lead import Lead
 from app.db.models.messages import ChannelMessage
+from app.security.analytics_access import tenant_agent_subquery, tenant_customer_subquery
 from app.schemas.dashboard import (
     AgentStat,
     AgentsOverview,
@@ -61,10 +62,17 @@ def _resolve_window(
     days: int,
     now: Optional[datetime] = None,
 ) -> tuple[datetime, datetime, int]:
-    """Resolve the query window to tz-aware UTC (start inclusive, end exclusive).
+    """Resolve the query window to **aware UTC** (start inclusive, end exclusive).
 
     Returns ``(start, end, days)``; ``days`` is the effective window length
     (0 when an explicit range was supplied).
+
+    Aware UTC is the canonical bound form: it binds to every source
+    ``timestamptz`` column (``conversation`` / ``messages`` / ``agent`` /
+    ``lead`` / ``customer`` / ...) as an absolute instant. P6AN-17 P2-3
+    (ADR-019) unified the whole schema to aware-UTC ``timestamptz``, so no
+    per-table naive-UTC stripping is required — a naive bound would be
+    session-timezone-dependent, and aware UTC is session-tz independent.
     """
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     if start is not None and end is not None:
@@ -74,13 +82,26 @@ def _resolve_window(
                 "time_range_start must be strictly before time_range_end"
             )
         return s, e, 0
-    e = end.astimezone(timezone.utc) if end is not None else now
-    s = start.astimezone(timezone.utc) if start is not None else e - timedelta(days=days)
+    e = (end if end is not None else now).astimezone(timezone.utc)
+    s = (start if start is not None else e - timedelta(days=days)).astimezone(timezone.utc)
     if s >= e:
         raise ValueError(
             "time_range_start must be strictly before time_range_end"
         )
     return s, e, max((e - s).days, 0)
+
+
+def _naive_utc(dt: datetime) -> datetime:
+    """Kept for backward-compatible imports; **no longer used** for lead/customer
+    window bounds.
+
+    P6AN-17 P2-3 unified the Phase 1-5 source columns (``lead``/``customer``/
+    ...) to aware-UTC ``timestamptz``, so query bounds are now aware-UTC and
+    bind directly as absolute instants — no naive stripping is required. The
+    platform-wide ``timestamptz`` convention (ADR-019) supersedes the
+    per-table naive ``timestamp`` handling this helper once implemented.
+    """
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 class DashboardOverviewService:
@@ -109,10 +130,13 @@ class DashboardOverviewService:
 
     # ----- sections ---------------------------------------------------------
 
-    async def _agents(self) -> AgentsOverview:
-        total = await self._scalar(self._count(Agent.id, Agent.is_deleted == False))  # noqa: E712
+    async def _agents(self, account_id: Optional[UUID] = None) -> AgentsOverview:
+        preds = [Agent.is_deleted == False]  # noqa: E712
+        if account_id is not None:
+            preds.append(Agent.id.in_(tenant_agent_subquery(account_id)))
+        total = await self._scalar(self._count(Agent.id, *preds))
         active = await self._scalar(
-            self._count(Agent.id, Agent.is_deleted == False, Agent.status == "active")  # noqa: E712
+            self._count(Agent.id, *preds, Agent.status == "active")
         )
         return AgentsOverview(total=int(total or 0), active=int(active or 0))
 
@@ -122,6 +146,7 @@ class DashboardOverviewService:
         end: datetime,
         agent_id: Optional[UUID],
         channel: Optional[str],
+        account_id: Optional[UUID] = None,
     ) -> ConversationsOverview:
         base = and_(
             Conversation.is_deleted == False,  # noqa: E712
@@ -129,6 +154,11 @@ class DashboardOverviewService:
             Conversation.created_at < end,
         )
         conditions = [base]
+        if account_id is not None:
+            # P6AN-16: tenant sees only conversations of its own customers.
+            conditions.append(
+                Conversation.customer_id.in_(tenant_customer_subquery(account_id))
+            )
         if channel is not None:
             conditions.append(Conversation.channel == channel)
         if agent_id is not None:
@@ -157,6 +187,10 @@ class DashboardOverviewService:
             Conversation.is_deleted == False,  # noqa: E712
             Conversation.status == "active",
         ]
+        if account_id is not None:
+            active_conditions.append(
+                Conversation.customer_id.in_(tenant_customer_subquery(account_id))
+            )
         if channel is not None:
             active_conditions.append(Conversation.channel == channel)
         if agent_id is not None:
@@ -184,6 +218,9 @@ class DashboardOverviewService:
             ChannelMessage.created_at >= start,
             ChannelMessage.created_at < end,
         ]
+        if account_id is not None:
+            # Tenant sees only its own channel-message rows.
+            msg_conditions.append(ChannelMessage.account_id == account_id)
         if channel is not None:
             msg_conditions.append(ChannelMessage.channel == channel)
         if agent_id is not None:
@@ -209,12 +246,16 @@ class DashboardOverviewService:
         end: datetime,
         agent_id: Optional[UUID],
         channel: Optional[str],
+        account_id: Optional[UUID] = None,
     ) -> MessagesOverview:
         conditions = [
             ChannelMessage.is_deleted == False,  # noqa: E712
             ChannelMessage.created_at >= start,
             ChannelMessage.created_at < end,
         ]
+        if account_id is not None:
+            # P6AN-16: tenant sees only its own channel-message rows.
+            conditions.append(ChannelMessage.account_id == account_id)
         if channel is not None:
             conditions.append(ChannelMessage.channel == channel)
         if agent_id is not None:
@@ -261,13 +302,25 @@ class DashboardOverviewService:
         start: datetime,
         end: datetime,
         agent_id: Optional[UUID],
+        account_id: Optional[UUID] = None,
     ) -> ConversionOverview:
+        # ``lead`` / ``customer`` are aware-UTC ``timestamptz`` (P6AN-17 P2-3):
+        # bind the aware-UTC window bounds directly as absolute instants.
+        lead_start, lead_end = start, end
         base = and_(
             Lead.is_deleted == False,  # noqa: E712
-            Lead.created_at >= start,
-            Lead.created_at < end,
+            Lead.created_at >= lead_start,
+            Lead.created_at < lead_end,
         )
         conditions = [base]
+        # P6AN-16: tenant sees only leads belonging to its own customers.
+        tenant_cust = (
+            Lead.customer_id.in_(tenant_customer_subquery(account_id))
+            if account_id is not None
+            else None
+        )
+        if tenant_cust is not None:
+            conditions.append(tenant_cust)
         if agent_id is not None:
             bound = (
                 select(AgentCustomerBinding.customer_id)
@@ -285,19 +338,24 @@ class DashboardOverviewService:
             )
             or 0
         )
+        all_live_conditions = [Lead.is_deleted == False]  # noqa: E712
+        if tenant_cust is not None:
+            all_live_conditions.append(tenant_cust)
         all_live = int(
             await self._scalar(
-                self._count(Lead.id, Lead.is_deleted == False)  # noqa: E712
+                self._count(Lead.id, *all_live_conditions)
             )
             or 0
         )
+        converted_conditions = [
+            Lead.is_deleted == False,  # noqa: E712
+            Lead.status == CONVERTED_LEAD_STATUS,
+        ]
+        if tenant_cust is not None:
+            converted_conditions.append(tenant_cust)
         converted = int(
             await self._scalar(
-                self._count(
-                    Lead.id,
-                    Lead.is_deleted == False,  # noqa: E712
-                    Lead.status == CONVERTED_LEAD_STATUS,
-                )
+                self._count(Lead.id, *converted_conditions)
             )
             or 0
         )
@@ -315,6 +373,7 @@ class DashboardOverviewService:
         end: datetime,
         agent_id: Optional[UUID],
         limit: int = 10,
+        account_id: Optional[UUID] = None,
     ) -> List[AgentStat]:
         conditions = [
             ChannelMessage.is_deleted == False,  # noqa: E712
@@ -322,6 +381,9 @@ class DashboardOverviewService:
             ChannelMessage.created_at >= start,
             ChannelMessage.created_at < end,
         ]
+        # P6AN-16: tenant sees only its own channel-message rows.
+        if account_id is not None:
+            conditions.append(ChannelMessage.account_id == account_id)
         if agent_id is not None:
             conditions.append(ChannelMessage.agent_id == agent_id)
             limit = 1
@@ -339,24 +401,31 @@ class DashboardOverviewService:
         rows = (await self.db.execute(grouped)).all()
 
         # Per-agent delivered/failed for the success rate (bounded dict of ids).
+        # Postgres has no ``filter()`` aggregate helper — use
+        # ``COUNT(CASE WHEN <cond> THEN 1 END)`` conditional counts.
         agent_ids = [r.agent_id for r in rows]
         rates: Dict[UUID, Optional[float]] = {}
         if agent_ids:
+            delivered_case = case(
+                (
+                    or_(
+                        ChannelMessage.status == "delivered",
+                        ChannelMessage.status == "read",
+                    ),
+                    1,
+                ),
+                else_=None,
+            )
+            failed_case = case(
+                (ChannelMessage.status == "failed", 1),
+                else_=None,
+            )
             rate_rows = (
                 await self.db.execute(
                     select(
                         ChannelMessage.agent_id,
-                        func.count(
-                            func.filter(
-                                or_(
-                                    ChannelMessage.status == "delivered",
-                                    ChannelMessage.status == "read",
-                                )
-                            )
-                        ).label("delivered"),
-                        func.count(
-                            func.filter(ChannelMessage.status == "failed")
-                        ).label("failed"),
+                        func.count(delivered_case).label("delivered"),
+                        func.count(failed_case).label("failed"),
                     )
                     .where(
                         ChannelMessage.agent_id.in_(agent_ids),
@@ -425,17 +494,23 @@ class DashboardOverviewService:
         agent_id: Optional[UUID] = None,
         channel: Optional[str] = None,
         now: Optional[datetime] = None,
+        account_id: Optional[UUID] = None,
     ) -> DashboardOverviewResponse:
-        """Compute the full overview (no caching — the router owns that)."""
+        """Compute the full overview (no caching — the router owns that).
+
+        P6AN-16: ``account_id`` (the caller's tenant, from the token) scopes
+        every section to that tenant's visible data; ``None`` = unscoped
+        (platform-wide actor).
+        """
         days = max(1, min(int(days), 365))
         s, e, eff_days = _resolve_window(start, end, days, now=now)
         rng = DashboardRange(start=s, end=e, days=eff_days)
 
-        agents = await self._agents()
-        conversations = await self._conversations(s, e, agent_id, channel)
-        messages = await self._messages(s, e, agent_id, channel)
-        conversion = await self._conversion(s, e, agent_id)
-        by_agent = await self._by_agent(s, e, agent_id)
+        agents = await self._agents(account_id)
+        conversations = await self._conversations(s, e, agent_id, channel, account_id)
+        messages = await self._messages(s, e, agent_id, channel, account_id)
+        conversion = await self._conversion(s, e, agent_id, account_id)
+        by_agent = await self._by_agent(s, e, agent_id, account_id=account_id)
 
         payload = DashboardOverviewResponse(
             range=rng,

@@ -59,6 +59,7 @@ from app.db.models.agent import Agent, AgentCustomerBinding
 from app.db.models.conversation import Conversation, Message
 from app.db.models.customer import Customer
 from app.db.models.lead import Lead
+from app.security.analytics_access import tenant_agent_subquery
 from app.schemas.agent_performance import (
     AgentPerformanceMetrics,
     AgentPerformanceResponse,
@@ -149,13 +150,13 @@ def _window_filters(ts: Any, since: Optional[datetime], until: Optional[datetime
 
 
 def _naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
-    """Strip tzinfo to a naive-UTC wall clock (exact for aware-UTC inputs).
+    """[Deprecated / kept for API compat] Strip tzinfo to a naive-UTC wall clock.
 
-    The codebase mixes naive (``lead.created_at``, ``customer.created_at``) and
-    aware (``conversation``/``message``) timestamp columns. Window bounds are
-    canonical aware-UTC; naive-tz columns need the naive wall clock so a
-    Postgres ``timestamp`` (no tz) column is compared against a matching literal
-    regardless of the session TZ.
+    P6AN-17 P2-3 (ADR-019): the codebase time columns are now uniformly
+    aware-UTC ``timestamptz`` (``lead``/``customer`` unified by migration
+    ``032_unify_source_time_tz``); window bounds bind directly to them as
+    absolute instants, so no naive stripping is required. Retained only so
+    external importers do not break.
     """
     return dt.replace(tzinfo=None) if dt is not None else None
 
@@ -211,10 +212,13 @@ class AgentPerformanceService:
 
     # ------------------------------------------------------------- aggregates
 
-    async def _fetch_agent(self, agent_id: UUID) -> Optional[Agent]:
-        res = await self.db.execute(
-            select(Agent).where(Agent.id == agent_id, Agent.is_deleted.is_(False))
-        )
+    async def _fetch_agent(self, agent_id: UUID,
+                           account_id: Optional[UUID] = None) -> Optional[Agent]:
+        preds = [Agent.id == agent_id, Agent.is_deleted.is_(False)]
+        # P6AN-16: an out-of-tenant agent id is not visible -> None -> 404.
+        if account_id is not None:
+            preds.append(Agent.id.in_(tenant_agent_subquery(account_id)))
+        res = await self.db.execute(select(Agent).where(*preds))
         return res.scalar_one_or_none()
 
     async def _aggregates_for(
@@ -288,10 +292,10 @@ class AgentPerformanceService:
         for agent_id, n in (await self.db.execute(msg)).all():
             out[agent_id]["message_count"] = int(n or 0)
 
-        # (3) lead volume in window, grouped by agent. Lead.created_at is a
-        # naive ``timestamp`` column, so the window bounds must be naive-UTC
-        # (exact for aware-UTC inputs) to compare cleanly regardless of TZ.
-        lead_since, lead_until = _naive_utc(since), _naive_utc(until)
+        # (3) lead volume in window, grouped by agent.
+        # P6AN-17 P2-3: Lead.created_at is now aware-UTC timestamptz, so bind
+        # the aware-UTC bounds directly as absolute instants.
+        lead_since, lead_until = since, until
         leads = (
             select(AgentCustomerBinding.agent_id, func.count(Lead.id).label("n"))
             .join(Customer, and_(
@@ -494,9 +498,15 @@ class AgentPerformanceService:
         range_: Optional[str] = "30d",
         since: Optional[datetime] = None,
         until: Optional[datetime] = None,
+        account_id: Optional[UUID] = None,
     ) -> AgentPerformanceResponse:
-        """One agent's KPI block (0-block when it has no data, 404 if absent)."""
-        agent = await self._fetch_agent(agent_id)
+        """One agent's KPI block (0-block when it has no data, 404 if absent).
+
+        P6AN-16: when ``account_id`` (the caller's tenant) is set the agent
+        must be one of that tenant's own agents — an out-of-tenant agent id
+        is a 404 (AgentNotFoundError), not a cross-tenant leak.
+        """
+        agent = await self._fetch_agent(agent_id, account_id)
         if agent is None:
             raise AgentNotFoundError(agent_id)
 
@@ -520,8 +530,13 @@ class AgentPerformanceService:
         name: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
+        account_id: Optional[UUID] = None,
     ) -> AgentPerformanceLeaderboardResponse:
-        """Ranked agent leaderboard (all live agents, zeros for empty ones)."""
+        """Ranked agent leaderboard (all live agents, zeros for empty ones).
+
+        P6AN-16: when ``account_id`` (the caller's tenant) is set, the
+        leaderboard lists only that tenant's own agents.
+        """
         if sort_key not in LEADERBOARD_SORT_KEYS:
             raise InvalidRangeError(
                 f"Unknown sort_key {sort_key!r}; expected one of {list(LEADERBOARD_SORT_KEYS)}."
@@ -536,6 +551,9 @@ class AgentPerformanceService:
 
         # Live agents matching the optional status / name filters.
         q = select(Agent).where(Agent.is_deleted.is_(False))
+        if account_id is not None:
+            # P6AN-16: tenant sees only its own agents on the leaderboard.
+            q = q.where(Agent.id.in_(tenant_agent_subquery(account_id)))
         if status:
             q = q.where(Agent.status == status)
         if name:
@@ -599,9 +617,10 @@ class AgentPerformanceService:
         if sort_key == "name":
             return m.agent_name.lower()
         if sort_key == "created_at":
-            # Agent.created_at is naive (datetime.utcnow default); keep the
-            # fallback naive so the comparator never mixes tz-aware/naive.
-            return agent.created_at or datetime.min
+            # P6AN-17 P2-3: Agent.created_at is aware-UTC timestamptz, so keep
+            # the fallback aware too (datetime.min is naive; mixing them in a
+            # comparator would raise TypeError).
+            return agent.created_at or datetime.min.replace(tzinfo=timezone.utc)
         if sort_key == "activity":
             return m.conversation_count + m.message_count
         if sort_key == "conversations":

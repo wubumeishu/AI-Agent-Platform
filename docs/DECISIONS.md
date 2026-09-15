@@ -376,3 +376,87 @@ cards (P6AN-17), not this ADR.
 **Source:** P6AN-16 architecture review t_67f18134 P1-1, decided by
 project-orchestrator t_adcbbb97, implemented by backend-engineer
 t_3e806a29, 2026-09-15
+
+## ADR-019  Source-table time columns unified to aware-UTC `timestamptz` (P6AN-17 P2-3)
+
+**Status:** Accepted - Implemented (2026-09-15, t_ccd4f521 / P6AN-17 P2-3)
+
+**Decision:** All Phase 1-5 *source* table time columns are now aware-UTC
+`timestamp with time zone`. The six source tables that still carried naive
+`timestamp without time zone` columns are unified by migration
+`alembic/versions/032_unify_source_time_tz.py`:
+
+| Table | Columns |
+|---|---|
+| `lead` | created_at, updated_at |
+| `customer` | created_at, updated_at |
+| `customer_identity` | created_at, updated_at |
+| `lifecycle_stage` | created_at, updated_at |
+| `lifecycle_stage_log` | created_at |
+| `tag` | created_at |
+
+These were the **last** naive columns in the schema; from this revision on the
+entire schema speaks one timezone (aware-UTC `timestamptz`), eliminating the
+recurring naive/timestamptz mixed-DDL bug class that P6AN-02's live 对撞
+caught three real bugs from (naive/tz family binding, invalid `func.filter`,
+URL `+00:00` decode-to-space 400).
+
+**Convention (ADR-009 binding, now whole-schema):**
+
+1. **ORM default:** `DateTime(timezone=True)` + `datetime.now(timezone.utc)`
+   (never `datetime.utcnow()` — it returns naive and writes to a `timestamptz`
+   column are re-interpreted in the *session* timezone).
+2. **Query bounds:** analytics / service window bounds are always aware-UTC
+   (coerce naive input with `.replace(tzinfo=timezone.utc)`, convert aware
+   with `.astimezone(timezone.utc)`), and bind **directly** to
+   `timestamptz` columns as absolute instants. Per-table `_naive_utc`
+   stripping is no longer required (removed where it existed).
+3. **Read-back:** `timestamptz` columns come back from asyncpg as
+   aware-UTC datetimes; any elapsed-time math must normalize **both** sides
+   to aware UTC (naive/aware subtraction raises `TypeError`).
+
+**Load-bearing detail — session `TimeZone` is Asia/Tokyo (JST), not UTC:**
+the PostgreSQL server/role here runs `TimeZone = Asia/Tokyo`. Two hazards
+follow, both probe-verified against the live server:
+
+- **Re-type:** a bare `CAST(col AS timestamptz)` / `ALTER ... TYPE timestamptz`
+  re-interprets the stored naive UTC wall-clock in the *session* tz — on this
+  server that is a silent −9h instant drift. The migration therefore retypes
+  with `USING (col AT TIME ZONE 'UTC')` (session-tz independent; preserves
+  the exact instant). The re-type is guarded to fire only while a column is
+  still naive, making the migration idempotent / re-runnable.
+- **Writes:** a naive Python datetime written into a `timestamptz` column is
+  interpreted by the driver in the session tz (JST) → 9h drift. All defaults
+  and write-sites on the six tables flipped to `datetime.now(timezone.utc)`.
+
+**Migration:** `032_unify_source_time_tz` (chains off `031_align_deal_item_
+customer_id_uuid`, the P2-5 head). `downgrade()` reverses with
+`USING (col AT TIME ZONE 'UTC')` (lossless). Verified on dev
+`ai_agent_platform` (alembic 031 → 032; UTC wall-clock preserved on real
+rows; read-back now aware-UTC) and applied DDL-only to the create_all-based
+test DB `ai_agent_platform_test`.
+
+**Regression:** P6AN-02 3-bug scenarios re-verified (dashboard overview with
+URL-encoded `+00:00` offset → 200; default window; agent binding subquery);
+P6AN-05 lead-conversion aware-UTC `from_date`/`to_date` (DEF-3 root cause) →
+200 with correct cycle math; P6AN-03 funnel, P6AN-07 agent-performance,
+P6AN-09 ROI all 200 under aware-UTC windows. Analytics offline suite 246 green;
+CRM lead/customer/tag/lifecycle suites 238 green; P6AN-05 live E2E 对拍
+35/35 green.
+
+**Reason:** P6AN-16 architecture review §4.2 P2-3 flagged the naive/tz split
+as a recurring bug root (each analytics service hand-stripped `_naive_utc`
+per table). Unifying the DDL removes the whole class at its source instead of
+shoring it up service by service; the ADR-009 `DateTime(timezone=True)`
+convention is now formally recorded and whole-schema.
+
+**Out of scope:** DEF-3's P6AN-05 aware-UTC boundary 500 standalone fix
+(t_dc92c614) — that card addressed the symptom; this card is its root-cause
+unification. Pre-existing naive `datetime.utcnow()` writes into *already*
+`timestamptz` tables (e.g. `private_domain` channel/plan/segment, content
+usage, nurture plan) drift on the JST server but were not part of this DDL
+unification; recorded as a separate follow-up (P3 hygiene card).
+
+**Source:** P6AN-16 architecture review t_67f18134 §4.2 P2-3, decided by
+project-orchestrator t_adcbbb97, implemented by backend-engineer t_ccd4f521,
+2026-09-15.

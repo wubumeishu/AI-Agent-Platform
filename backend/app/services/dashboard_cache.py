@@ -161,11 +161,17 @@ def build_cache_key(
     days: str,
     agent_id: Optional[str],
     channel: Optional[str],
+    account_id: Optional[str] = None,
 ) -> str:
-    """Content-addressed key: same normalized params -> same cache entry."""
+    """Content-addressed key: same normalized params -> same cache entry.
+
+    P6AN-16: the tenant (``account_id``) is part of the key so a cached
+    overview computed for one tenant is never served to another (cross-tenant
+    cache aliasing is a data leak even though it is "just" a cache hit).
+    """
     digest = hashlib.sha1(
         json.dumps(
-            [start, end, days, agent_id or "", channel or ""],
+            [start, end, days, agent_id or "", channel or "", account_id or ""],
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")

@@ -386,6 +386,11 @@ def _full_compute_canned(delivered: int = 25, failed: int = 2) -> List[Any]:
 def _make_app(canned: List[Any] = None) -> FastAPI:
     app = FastAPI()
     app.include_router(dr.router)
+    # P6AN-16: dashboard overview now requires an authenticated principal.
+    # Functional tests use a platform-wide admin (no tenant scoping) to keep
+    # the legacy unscoped behavior under test.
+    from app.security.analytics_access import override_analytics_auth, test_principal
+    override_analytics_auth(app, test_principal(role="admin"))
     db = FakeDB(canned if canned is not None else _full_compute_canned())
     app.dependency_overrides[get_db] = lambda: db
     return app
@@ -468,6 +473,29 @@ class TestOverviewAPI:
         r = client.get("/api/v1/analytics/dashboard/overview",
                        params={"time_range_start": "not-a-date"})
         assert r.status_code == 400
+
+    def test_url_decoded_plus_offset_parsed(self):
+        """A ``+00:00`` offset in a query string URL-decodes to a space
+        (``... 00:00``); the parser must recover, not 400 (real client bug)."""
+        client = TestClient(_make_app())
+        r = client.get(
+            "/api/v1/analytics/dashboard/overview",
+            # Simulate what an HTTP client sends: the + is already decoded.
+            params={"time_range_start": "2026-09-01T00:00:00 00:00",
+                    "time_range_end": "2026-09-15T00:00:00 00:00"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["range"]["days"] == 0  # explicit range
+
+    def test_url_encoded_plus_offset_end_to_end(self):
+        """Percent-encoded ``%2B00%3A00`` reaches the handler as ``+00:00``."""
+        client = TestClient(_make_app())
+        r = client.get(
+            "/api/v1/analytics/dashboard/overview?time_range_start="
+            "2026-09-01T00%3A00%3A00%2B00%3A00&time_range_end="
+            "2026-09-15T00%3A00%3A00%2B00%3A00"
+        )
+        assert r.status_code == 200, r.text
 
     def test_days_bounds_422(self):
         client = TestClient(_make_app())

@@ -109,8 +109,13 @@ class ConversationMetricsService:
         channel: Optional[str] = None,
         threshold: float = DEFAULT_INTENT_ACCURACY_THRESHOLD,
         now: Optional[datetime] = None,
+        account_id: Optional[UUID] = None,
     ) -> ConversationMetricsResponse:
         """Compute conversation metrics for the given scope.
+
+        P6AN-16: when ``account_id`` (the caller's tenant, from the token) is
+        set, conversations are restricted to the tenant's own customers, so a
+        tenant can never read another tenant's conversation quality data.
 
         Never raises on empty scope — returns a response with
         ``has_data=False`` and all-zero / empty-safe metrics.
@@ -118,7 +123,8 @@ class ConversationMetricsService:
         now = now or datetime.now(timezone.utc)
         start, end, window_label = self.resolve_range(range_value, now)
 
-        sc, sc_params = self._scoped_cte(start, end, agent_id, intent_type, channel)
+        sc, sc_params = self._scoped_cte(start, end, agent_id, intent_type, channel,
+                                          account_id=account_id)
         # base_params carries the window + filter binds for the shared CTE plus
         # the threshold; _params() layers the escalating-intent binds on top.
         base_params = {**sc_params, "threshold": threshold}
@@ -129,6 +135,7 @@ class ConversationMetricsService:
         by_intent_rows = await self._query_by_intent(sc, base_params)
 
         filters = {"agent_id": str(agent_id) if agent_id else None,
+                   "account_id": str(account_id) if account_id else None,
                    "intent_type": intent_type, "channel": channel}
         window = {"start": start.isoformat(), "end": end.isoformat(), "window": window_label}
         return self._assemble(raw, by_platform_rows, by_agent_rows, by_intent_rows,
@@ -138,7 +145,8 @@ class ConversationMetricsService:
     # ------------------------------------------------------------------ #
     # SQL construction (shared scoped CTE)
     # ------------------------------------------------------------------ #
-    def _scoped_cte(self, start, end, agent_id, intent_type, channel) -> tuple[str, Dict[str, Any]]:
+    def _scoped_cte(self, start, end, agent_id, intent_type, channel,
+                    account_id: Optional[UUID] = None) -> tuple[str, Dict[str, Any]]:
         """Build the shared ``sc`` CTE and its bind params.
 
         Filter clauses are added **conditionally** so a NULL filter value is
@@ -147,6 +155,10 @@ class ConversationMetricsService:
         simply omit the clause and its bind instead of writing the
         ``(:x IS NULL OR ...)`` pattern. The time window is always present
         (``start``/``end`` are concrete datetimes).
+
+        P6AN-16: ``account_id`` (the caller's tenant) adds an EXISTS clause
+        restricting conversations to customers served by the tenant's own
+        agents (via ``agent_persona_binding`` -> ``agent_customer_binding``).
         """
         where = [
             "c.is_deleted = false",
@@ -175,6 +187,19 @@ class ConversationMetricsService:
                 "      AND i.is_deleted = false)"
             )
             params["intent_type"] = intent_type
+        if account_id is not None:
+            # P6AN-16: tenant scope — conversations only for customers served
+            # by this account's own agents.
+            where.append(
+                "EXISTS (\n"
+                "    SELECT 1 FROM agent_customer_binding acb\n"
+                "    WHERE acb.customer_id = c.customer_id\n"
+                "      AND acb.is_deleted = false\n"
+                "      AND acb.agent_id IN (\n"
+                "          SELECT apb.agent_id FROM agent_persona_binding apb\n"
+                "          WHERE apb.account_id = :account_id))"
+            )
+            params["account_id"] = account_id
 
         where_sql = "\n    AND ".join(where)
         sc = (

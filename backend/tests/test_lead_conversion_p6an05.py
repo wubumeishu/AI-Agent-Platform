@@ -175,6 +175,11 @@ def _lead_cycle_rows(start: datetime = NOW, cycles=None, lead_ids=None):
 def _conversion_app(db) -> FastAPI:
     app = FastAPI(title="P6AN-05 lead-conversion-only app")
     app.include_router(analytics_router)
+    # P6AN-16: the analytics surface now requires an authenticated principal.
+    # Functional tests use a platform-wide admin principal (no tenant scoping)
+    # to preserve the legacy unscoped behavior under test.
+    from app.security.analytics_access import override_analytics_auth, test_principal
+    override_analytics_auth(app, test_principal(role="admin"))
     from app.db.session import get_db
     app.dependency_overrides[get_db] = lambda: db
     return app

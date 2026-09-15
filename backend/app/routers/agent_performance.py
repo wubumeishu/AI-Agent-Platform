@@ -30,6 +30,8 @@ from app.schemas.agent_performance import (
     LEADERBOARD_ORDERS,
     LEADERBOARD_SORT_KEYS,
 )
+from app.security.analytics_access import require_analytics_read
+from app.security.jwt_auth import PrivateDomainPrincipal
 from app.services.agent_performance_service import (
     AgentNotFoundError,
     AgentPerformanceService,
@@ -74,6 +76,7 @@ async def agent_performance_leaderboard(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     """Ranked agent leaderboard.
 
@@ -81,6 +84,10 @@ async def agent_performance_leaderboard(
     data), ordered by ``sort`` (direction ``order``) with a deterministic
     name/created_at tie-break, then paged. Rates substitute 0.0 when null so
     ordering never crashes.
+
+    P6AN-16: the leaderboard is scoped to the caller's tenant — a tenant sees
+    only its own agents' KPIs; a platform-wide actor (elevated role) sees the
+    whole platform.
     """
     svc = AgentPerformanceService(db)
     try:
@@ -95,6 +102,7 @@ async def agent_performance_leaderboard(
             name=name,
             page=page,
             page_size=page_size,
+            account_id=principal.account_id,
         )
     except InvalidRangeError as e:
         raise HTTPException(status_code=422, detail=e.detail) from e
@@ -113,14 +121,20 @@ async def agent_performance_single(
     since: Optional[str] = Query(None, description="Optional ISO-8601 start bound override."),
     until: Optional[str] = Query(None, description="Optional ISO-8601 end bound override."),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     """One agent's KPI block. 404 if the agent does not exist; zeroed block if
-    it has no data (never an error)."""
+    it has no data (never an error).
+
+    P6AN-16: the agent must belong to the caller's tenant — an out-of-tenant
+    agent id is a 404 (AgentNotFoundError), never a cross-tenant leak.
+    """
     svc = AgentPerformanceService(db)
     try:
         since_dt, until_dt = _parse_bounds(since, until)
         return await svc.single(
             agent_id, range_=range, since=since_dt, until=until_dt,
+            account_id=principal.account_id,
         )
     except AgentNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

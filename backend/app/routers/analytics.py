@@ -47,6 +47,21 @@ P6AN-08 delta (this card)
   plain-language significance note. Basic comparison only — no
   statistical-inference library (out of scope for P6AN-08).
 
+P6AN-05 delta (this card)
+=========================
+- ``GET /api/v1/analytics/leads/conversion`` — lead conversion funnel
+  (new → contacted → qualified → converted) + average conversion cycle.
+  Service: ``app.services.lead_conversion_service.LeadConversionService``
+  (pure metric math in ``compute_metrics``; read-only aggregation over
+  lead / agent_customer_binding / agent / conversation /
+  lifecycle_stage_log — no new tables). Filters: ``agent_id`` (via
+  agent_customer_binding), ``channel`` (conversation.channel; excludes
+  non-conversation leads), ``from_date`` / ``to_date`` on
+  lead.created_at; ``group_by`` = overall | agent | channel. Rates are
+  null when the denominator stage is empty (no data, not 0%); the
+  conversion cycle is null when there are no converted leads. Full
+  caliber doc: ``docs/LEAD-CONVERSION.md``.
+
 P6AN-03 delta (this card)
 =========================
 - ``GET /api/v1/analytics/funnel`` — acquisition-funnel computation
@@ -110,6 +125,11 @@ from app.services.lead_conversion_service import (
     LeadConversionError,
     LeadConversionService,
 )
+from app.security.analytics_access import (
+    require_analytics_read,
+    require_analytics_write,
+)
+from app.security.jwt_auth import PrivateDomainPrincipal
 
 router = APIRouter(prefix="/api/v1/analytics", tags=["Analytics"])
 
@@ -128,10 +148,12 @@ def _raise_not_found(err: AnalyticsEntityNotFoundError) -> None:
 
 @router.post("/widgets", response_model=DashboardWidgetResponse, status_code=201)
 async def create_widget(
-    data: DashboardWidgetCreate, db: AsyncSession = Depends(get_db)
+    data: DashboardWidgetCreate,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
 ):
     svc = DashboardWidgetService(db)
-    return DashboardWidgetResponse.from_model(await svc.create(data))
+    return DashboardWidgetResponse.from_model(await svc.create(data, principal))
 
 
 @router.get("/widgets", response_model=DashboardWidgetListResponse)
@@ -141,10 +163,11 @@ async def list_widgets(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     svc = DashboardWidgetService(db)
     items, total = await svc.list(widget_type=widget_type, enabled=enabled,
-                                 page=page, page_size=page_size)
+                                 page=page, page_size=page_size, principal=principal)
     return DashboardWidgetListResponse(
         items=[DashboardWidgetResponse.from_model(w) for w in items],
         total=total, page=page, page_size=page_size,
@@ -152,9 +175,13 @@ async def list_widgets(
 
 
 @router.get("/widgets/{widget_id}", response_model=DashboardWidgetResponse)
-async def get_widget(widget_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_widget(
+    widget_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
+):
     svc = DashboardWidgetService(db)
-    widget = await svc.get(widget_id)
+    widget = await svc.get(widget_id, principal)
     if widget is None:
         raise HTTPException(status_code=404, detail=f"Dashboard widget {widget_id} not found")
     return DashboardWidgetResponse.from_model(widget)
@@ -162,19 +189,25 @@ async def get_widget(widget_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.put("/widgets/{widget_id}", response_model=DashboardWidgetResponse)
 async def update_widget(
-    widget_id: UUID, data: DashboardWidgetUpdate, db: AsyncSession = Depends(get_db)
+    widget_id: UUID, data: DashboardWidgetUpdate,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
 ):
     svc = DashboardWidgetService(db)
-    widget = await svc.get(widget_id)
+    widget = await svc.get(widget_id, principal)
     if widget is None:
         raise HTTPException(status_code=404, detail=f"Dashboard widget {widget_id} not found")
-    return DashboardWidgetResponse.from_model(await svc.update(widget, data))
+    return DashboardWidgetResponse.from_model(await svc.update(widget, data, principal))
 
 
 @router.delete("/widgets/{widget_id}", status_code=204)
-async def delete_widget(widget_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_widget(
+    widget_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
+):
     svc = DashboardWidgetService(db)
-    deleted = await svc.delete(widget_id)
+    deleted = await svc.delete(widget_id, principal)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Dashboard widget {widget_id} not found")
     return None
@@ -184,11 +217,13 @@ async def delete_widget(widget_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.post("/funnel-steps", response_model=FunnelStepResponse, status_code=201)
 async def create_funnel_step(
-    data: FunnelStepCreate, db: AsyncSession = Depends(get_db)
+    data: FunnelStepCreate,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
 ):
     svc = FunnelStepService(db)
     try:
-        step = await svc.create(data)
+        step = await svc.create(data, principal)
     except AnalyticsConflictError as e:
         _raise_conflict(e)
     return FunnelStepResponse.from_model(step)
@@ -200,9 +235,11 @@ async def list_funnel_steps(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     svc = FunnelStepService(db)
-    items, total = await svc.list(funnel_code=funnel_code, page=page, page_size=page_size)
+    items, total = await svc.list(funnel_code=funnel_code, page=page, page_size=page_size,
+                                 principal=principal)
     return FunnelStepListResponse(
         items=[FunnelStepResponse.from_model(s) for s in items],
         total=total, page=page, page_size=page_size,
@@ -210,9 +247,13 @@ async def list_funnel_steps(
 
 
 @router.get("/funnel-steps/{step_id}", response_model=FunnelStepResponse)
-async def get_funnel_step(step_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_funnel_step(
+    step_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
+):
     svc = FunnelStepService(db)
-    step = await svc.get(step_id)
+    step = await svc.get(step_id, principal)
     if step is None:
         raise HTTPException(status_code=404, detail=f"Funnel step {step_id} not found")
     return FunnelStepResponse.from_model(step)
@@ -220,22 +261,28 @@ async def get_funnel_step(step_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.put("/funnel-steps/{step_id}", response_model=FunnelStepResponse)
 async def update_funnel_step(
-    step_id: UUID, data: FunnelStepUpdate, db: AsyncSession = Depends(get_db)
+    step_id: UUID, data: FunnelStepUpdate,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
 ):
     svc = FunnelStepService(db)
-    step = await svc.get(step_id)
+    step = await svc.get(step_id, principal)
     if step is None:
         raise HTTPException(status_code=404, detail=f"Funnel step {step_id} not found")
     try:
-        return FunnelStepResponse.from_model(await svc.update(step, data))
+        return FunnelStepResponse.from_model(await svc.update(step, data, principal))
     except AnalyticsConflictError as e:
         _raise_conflict(e)
 
 
 @router.delete("/funnel-steps/{step_id}", status_code=204)
-async def delete_funnel_step(step_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_funnel_step(
+    step_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
+):
     svc = FunnelStepService(db)
-    deleted = await svc.delete(step_id)
+    deleted = await svc.delete(step_id, principal)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Funnel step {step_id} not found")
     return None
@@ -266,6 +313,7 @@ async def compute_acquisition_funnel(
         ),
     ),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     """Compute the acquisition funnel: per-stage reached counts + conversion rates.
 
@@ -275,13 +323,21 @@ async def compute_acquisition_funnel(
     time window) are composed into one GROUP-BY over live leads. An empty
     scope returns a well-formed empty funnel (all counts 0, null rates) --
     never a 500.
+
+    P6AN-16: scoped to the caller's tenant — the funnel only counts leads
+    belonging to the tenant's own customers (its agents' customers); a
+    platform-wide actor (elevated role) sees the whole platform.
     """
     from app.services.funnel_service import compute_funnel
 
+    # P6AN-16: the tenant is the caller's account (from the token), never a
+    # client-supplied value. A platform-wide actor (account_id None) is
+    # unscoped; a tenant scopes the funnel to its own customers.
     return await compute_funnel(
         db,
         agent_id=agent_id,
         platform_id=platform_id,
+        account_id=principal.account_id,
         range=range,
         from_date=from_date,
         to_date=to_date,
@@ -293,11 +349,13 @@ async def compute_acquisition_funnel(
 
 @router.post("/metrics", response_model=MetricDefinitionResponse, status_code=201)
 async def create_metric(
-    data: MetricDefinitionCreate, db: AsyncSession = Depends(get_db)
+    data: MetricDefinitionCreate,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
 ):
     svc = MetricDefinitionService(db)
     try:
-        metric = await svc.create(data)
+        metric = await svc.create(data, principal)
     except AnalyticsConflictError as e:
         _raise_conflict(e)
     return MetricDefinitionResponse.from_model(metric)
@@ -310,10 +368,11 @@ async def list_metrics(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     svc = MetricDefinitionService(db)
     items, total = await svc.list(category=category, enabled=enabled,
-                                 page=page, page_size=page_size)
+                                 page=page, page_size=page_size, principal=principal)
     return MetricDefinitionListResponse(
         items=[MetricDefinitionResponse.from_model(m) for m in items],
         total=total, page=page, page_size=page_size,
@@ -321,9 +380,13 @@ async def list_metrics(
 
 
 @router.get("/metrics/{metric_id}", response_model=MetricDefinitionResponse)
-async def get_metric(metric_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_metric(
+    metric_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
+):
     svc = MetricDefinitionService(db)
-    metric = await svc.get(metric_id)
+    metric = await svc.get(metric_id, principal)
     if metric is None:
         raise HTTPException(status_code=404, detail=f"Metric definition {metric_id} not found")
     return MetricDefinitionResponse.from_model(metric)
@@ -331,19 +394,25 @@ async def get_metric(metric_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.put("/metrics/{metric_id}", response_model=MetricDefinitionResponse)
 async def update_metric(
-    metric_id: UUID, data: MetricDefinitionUpdate, db: AsyncSession = Depends(get_db)
+    metric_id: UUID, data: MetricDefinitionUpdate,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
 ):
     svc = MetricDefinitionService(db)
-    metric = await svc.get(metric_id)
+    metric = await svc.get(metric_id, principal)
     if metric is None:
         raise HTTPException(status_code=404, detail=f"Metric definition {metric_id} not found")
-    return MetricDefinitionResponse.from_model(await svc.update(metric, data))
+    return MetricDefinitionResponse.from_model(await svc.update(metric, data, principal))
 
 
 @router.delete("/metrics/{metric_id}", status_code=204)
-async def delete_metric(metric_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_metric(
+    metric_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
+):
     svc = MetricDefinitionService(db)
-    deleted = await svc.delete(metric_id)
+    deleted = await svc.delete(metric_id, principal)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Metric definition {metric_id} not found")
     return None
@@ -353,11 +422,13 @@ async def delete_metric(metric_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.post("/experiments", response_model=ExperimentResponse, status_code=201)
 async def create_experiment(
-    data: ExperimentCreate, db: AsyncSession = Depends(get_db)
+    data: ExperimentCreate,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
 ):
     svc = ExperimentService(db)
     try:
-        exp = await svc.create(data)
+        exp = await svc.create(data, principal)
     except AnalyticsConflictError as e:
         _raise_conflict(e)
     return ExperimentResponse.from_model(exp)
@@ -369,9 +440,11 @@ async def list_experiments(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     svc = ExperimentService(db)
-    items, total = await svc.list(status=status, page=page, page_size=page_size)
+    items, total = await svc.list(status=status, page=page, page_size=page_size,
+                                 principal=principal)
     return ExperimentListResponse(
         items=[ExperimentResponse.from_model(e) for e in items],
         total=total, page=page, page_size=page_size,
@@ -379,9 +452,13 @@ async def list_experiments(
 
 
 @router.get("/experiments/{experiment_id}", response_model=ExperimentResponse)
-async def get_experiment(experiment_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_experiment(
+    experiment_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
+):
     svc = ExperimentService(db)
-    exp = await svc.get(experiment_id)
+    exp = await svc.get(experiment_id, principal)
     if exp is None:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
     return ExperimentResponse.from_model(exp)
@@ -389,14 +466,16 @@ async def get_experiment(experiment_id: UUID, db: AsyncSession = Depends(get_db)
 
 @router.put("/experiments/{experiment_id}", response_model=ExperimentResponse)
 async def update_experiment(
-    experiment_id: UUID, data: ExperimentUpdate, db: AsyncSession = Depends(get_db)
+    experiment_id: UUID, data: ExperimentUpdate,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
 ):
     svc = ExperimentService(db)
-    exp = await svc.get(experiment_id)
+    exp = await svc.get(experiment_id, principal)
     if exp is None:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
     try:
-        return ExperimentResponse.from_model(await svc.update(exp, data))
+        return ExperimentResponse.from_model(await svc.update(exp, data, principal))
     except AnalyticsConflictError as e:
         # P6AN-08: a rejected variant traffic allocation is a 409, not a 500.
         _raise_conflict(e)
@@ -404,14 +483,16 @@ async def update_experiment(
 
 @router.post("/experiments/{experiment_id}/status", response_model=ExperimentResponse)
 async def set_experiment_status(
-    experiment_id: UUID, data: ExperimentStatusUpdate, db: AsyncSession = Depends(get_db)
+    experiment_id: UUID, data: ExperimentStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
 ):
     svc = ExperimentService(db)
-    exp = await svc.get(experiment_id)
+    exp = await svc.get(experiment_id, principal)
     if exp is None:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
     try:
-        updated = await svc.set_status(exp, data)
+        updated = await svc.set_status(exp, data, principal)
     except ExperimentStatusError as e:
         raise HTTPException(
             status_code=409,
@@ -423,9 +504,13 @@ async def set_experiment_status(
 
 
 @router.delete("/experiments/{experiment_id}", status_code=204)
-async def delete_experiment(experiment_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_experiment(
+    experiment_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
+):
     svc = ExperimentService(db)
-    deleted = await svc.delete(experiment_id)
+    deleted = await svc.delete(experiment_id, principal)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
     return None
@@ -439,13 +524,15 @@ async def delete_experiment(experiment_id: UUID, db: AsyncSession = Depends(get_
     status_code=201,
 )
 async def create_experiment_result(
-    experiment_id: UUID, data: ExperimentResultCreate, db: AsyncSession = Depends(get_db)
+    experiment_id: UUID, data: ExperimentResultCreate,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
 ):
     svc = ExperimentService(db)
     # Path is the source of truth for the owning experiment.
     data.experiment_id = experiment_id
     try:
-        result = await svc.add_result(data)
+        result = await svc.add_result(data, principal)
     except AnalyticsEntityNotFoundError as e:
         _raise_not_found(e)
     return ExperimentResultResponse.from_model(result)
@@ -462,14 +549,15 @@ async def list_experiment_results(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     svc = ExperimentService(db)
-    exp = await svc.get(experiment_id)
+    exp = await svc.get(experiment_id, principal)
     if exp is None:
         raise HTTPException(status_code=404, detail=f"Experiment {experiment_id} not found")
     items, total = await svc.list_results(
         experiment_id, variant_label=variant_label, metric_code=metric_code,
-        page=page, page_size=page_size,
+        page=page, page_size=page_size, principal=principal,
     )
     return ExperimentResultListResponse(
         items=[ExperimentResultResponse.from_model(r) for r in items],
@@ -488,27 +576,34 @@ async def summarize_experiment_results(
         description="p-value cutoff used for the 'significant' note (no inference lib this wave).",
     ),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     """P6AN-08: per-metric variant comparison for one experiment.
 
     Returns the latest result snapshot per (variant, metric), a derived lift
     vs the baseline variant, and a plain-language significance note. Basic
     comparison only — no statistical-inference library (out of scope for
-    P6AN-08).
+    P6AN-08). P6AN-16: gated to the caller's tenancy via the owning
+    experiment's visibility (an out-of-tenant experiment is a 404).
     """
     svc = ExperimentService(db)
     try:
         return await svc.summarize_results(
-            experiment_id, significance_threshold=significance_threshold
+            experiment_id, significance_threshold=significance_threshold,
+            principal=principal,
         )
     except AnalyticsEntityNotFoundError as e:
         _raise_not_found(e)
 
 
 @router.get("/experiment-results/{result_id}", response_model=ExperimentResultResponse)
-async def get_experiment_result(result_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_experiment_result(
+    result_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
+):
     svc = ExperimentService(db)
-    result = await svc.get_result(result_id)
+    result = await svc.get_result(result_id, principal)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Experiment result {result_id} not found")
     return ExperimentResultResponse.from_model(result)
@@ -516,19 +611,25 @@ async def get_experiment_result(result_id: UUID, db: AsyncSession = Depends(get_
 
 @router.put("/experiment-results/{result_id}", response_model=ExperimentResultResponse)
 async def update_experiment_result(
-    result_id: UUID, data: ExperimentResultUpdate, db: AsyncSession = Depends(get_db)
+    result_id: UUID, data: ExperimentResultUpdate,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
 ):
     svc = ExperimentService(db)
-    result = await svc.get_result(result_id)
+    result = await svc.get_result(result_id, principal)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Experiment result {result_id} not found")
-    return ExperimentResultResponse.from_model(await svc.update_result(result, data))
+    return ExperimentResultResponse.from_model(await svc.update_result(result, data, principal))
 
 
 @router.delete("/experiment-results/{result_id}", status_code=204)
-async def delete_experiment_result(result_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_experiment_result(
+    result_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_write),
+):
     svc = ExperimentService(db)
-    deleted = await svc.delete_result(result_id)
+    deleted = await svc.delete_result(result_id, principal)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Experiment result {result_id} not found")
     return None
@@ -575,14 +676,18 @@ async def get_conversation_metrics(
                     "accurate when confidence >= threshold AND an action was matched.",
     ),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     svc = ConversationMetricsService(db)
+    # P6AN-16: scope to the caller's tenant (its own customers' conversations);
+    # a platform-wide actor (account_id None) is unscoped.
     return await svc.compute(
         agent_id=agent_id,
         range_value=range,
         intent_type=intent_type,
         channel=channel,
         threshold=accuracy_threshold,
+        account_id=principal.account_id,
     )
 
 
@@ -625,15 +730,20 @@ async def get_lead_conversion(
         description="Aggregation: overall | agent | channel.",
     ),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     svc = LeadConversionService(db)
     try:
+        # P6AN-16: scope the lead funnel to the caller's tenant (its own
+        # customers' leads); a platform-wide actor (account_id None) is
+        # unscoped. The account comes from the token, never a client param.
         data = await svc.compute(
             agent_id=agent_id,
             channel=channel,
             from_date=from_date,
             to_date=to_date,
             group_by=group_by,
+            account_id=principal.account_id,
         )
     except LeadConversionError as e:
         raise HTTPException(status_code=422, detail=str(e))

@@ -58,6 +58,39 @@ SQL 自由报表引擎（见任务卡 Out of Scope）。
 
 ---
 
+## 认证与租户隔离（P6AN-16 / P1-1）
+
+自 P6AN-16 起，**整个 `/api/v1/analytics/*` 表面（含 P6AN-02/03/04/05/06/07/08/09
+各 router）都要求认证**——不再有匿名端点。实现位于
+`app/security/analytics_access.py`（复用 ADR-011 的 `get_current_principal` /
+HS256 Bearer，未新增 token 机制）：
+
+- **两个 guard**：
+  - `require_analytics_read` — 所有 **读** 端点（overview / funnel /
+    conversations / leads / agents / roi / private-domain / 定义列表 / 详情）。
+    最低 read 权：`ANALYTICS_ROLES`（viewer / operator / admin /
+    platform_admin）。
+  - `require_analytics_write` — 所有 **CRUD 写** 端点。最低 write 权：
+    `WRITE_CAPABLE_ROLES`（operator / admin / platform_admin）；`viewer` 只读。
+- **401**：缺失 / 无效 / 过期 / 非 UUID 账户的 Bearer token（`get_current_principal`
+  上游产生）。**403**：角色低于对应底线；或未绑账户的普通 operator 试图做
+  platform-wide（`account_id=NULL`）读——该跨租户读路径在 guard 层即关闭。
+- **租户作用域**：读端点的 `account_id` 一律取自 **token**，绝不信任客户端参数。
+  调用方只能看到本账户可见数据（经 `agent_persona_binding → agent_customer_binding`
+  的 customer/agent 维度 + account-owned 源表）；`account_id=NULL` 的
+  platform-wide 定义仅 `PLATFORM_WIDE_ROLES`（admin / platform_admin）可见。
+- **CRUD 归属**：create 强制归属调用方账户（客户端 `account_id` 被 `resolve_create_account`
+  覆盖/校验，跨租户 → `AccountOwnershipError` → 全局 403 handler）；跨租户按 id 读 /
+  改 / 删 → 404（不泄漏账户存在性）。
+- **缓存**：dashboard overview 的响应缓存键含租户，跨租户绝不别名。
+
+> 调用方获取 token：`POST /api/v1/auth/token`（P0-1）mint 一个绑定
+> `account_id` + `role` 的 operator token；platform-wide 场景由 admin /
+> platform_admin 角色 token 承载。测试用 `override_analytics_auth(app,
+> test_principal(...))` 直接注入主体（无需真实 JWT）。
+
+---
+
 ## P6AN-08 增量（Strategy Experiment 策略实验）
 
 > 任务卡：`t_98039e0f`。在 P6AN-01 定义层之上，把 experiment 的

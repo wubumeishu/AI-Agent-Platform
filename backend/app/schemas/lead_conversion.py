@@ -46,6 +46,11 @@ class LeadConversionGroup(BaseModel):
 
 class LeadConversionFilters(BaseModel):
     agent_id: Optional[str] = None
+    account_id: Optional[str] = Field(
+        None,
+        description="P6AN-16: the caller's owning account (from the token) "
+                    "that the funnel was scoped to; null for a platform-wide actor.",
+    )
     channel: Optional[str] = None
     from_date: Optional[datetime] = None
     to_date: Optional[datetime] = None

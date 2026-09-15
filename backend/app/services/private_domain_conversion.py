@@ -61,6 +61,10 @@ from app.db.models.customer import Customer
 from app.db.models.messages import ChannelMessage
 from app.db.models.nurture_execution import NurtureStepExecution
 from app.db.models.private_domain import DealItem, FollowUpTask
+from app.security.analytics_access import (
+    tenant_agent_subquery,
+    tenant_customer_subquery,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,11 +155,24 @@ class PrivateDomainConversionService:
                     AgentCustomerBinding.is_deleted == False,  # noqa: E712
                 )
             )
+            # P6AN-16: a tenant may only inspect its own agents' customers.
+            if account_id is not None:
+                base_q = base_q.where(
+                    AgentCustomerBinding.agent_id.in_(
+                        tenant_agent_subquery(account_id)
+                    )
+                )
         else:
             base_q = (
                 select(func.count(func.distinct(Customer.id)))
                 .where(Customer.is_deleted == False)  # noqa: E712
             )
+            # P6AN-16: a tenant's "all customers" is its own customers, not the
+            # whole platform (cross-tenant read closed at the data layer).
+            if account_id is not None:
+                base_q = base_q.where(
+                    Customer.id.in_(tenant_customer_subquery(account_id))
+                )
         raw["base_customers"] = int((await db.execute(base_q)).scalar() or 0)
 
         # ---- reached / interacted (distinct customers via messages) ----

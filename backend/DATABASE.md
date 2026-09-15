@@ -40,7 +40,7 @@ Phase 1 资源层共 **9 张主表 + 3 张绑定表 + 7 个索引 + 5 个触发�
 
 ## 2. 迁移链路（Alembic）
 
-当前 head: **`021_phase1_persona_trigger`**。
+当前 head: **`032_unify_source_time_tz`**（后续历史 head 见各阶段变更记录）。
 
 Phase 1 资源层由下列迁移承载（`002_add_platform` 为旧 stub 链，实际建表逻辑在 `002_account_resource_layer`）：
 
@@ -48,6 +48,21 @@ Phase 1 资源层由下列迁移承载（`002_add_platform` 为旧 stub 链，�
 |------|------|
 | `002_account_resource_layer` | 创建 platform / agent / persona / account / browser_profile / proxy + 3 张绑定表 + 7 个索引 + 内置平台种子 + 共享 `update_updated_at_column()` 函数 + **4 个触发器**（agent/account/browser_profile/proxy，经 f-string 循环；循环**漏掉 persona**） |
 | `021_phase1_persona_trigger` | **幂等补齐 persona 触发器**：若 `update_persona_updated_at` 不存在则创建，确保“仅通过 Alembic 从零建库”的路径也能得到完整 Phase 1 触发器集 |
+| `028_analytics_tables` | Phase 6 analytics 5 张定义表（P6AN-01） |
+| `029_p0_security_data_protection` | P0 安全/数据保护（ADR-011） |
+| `030_align_phase5_analytics_cols` | 生产 legacy fork 对齐：补齐 deal_item/follow_up_task Phase-5 列（P2-5） |
+| `031_align_deal_item_customer_id_uuid` | 生产 legacy fork 对齐：deal_item.customer_id → UUID（P2-5） |
+| `032_unify_source_time_tz` | **P6AN-17 P2-3：Phase 1-5 源表时间列归一为 aware-UTC `timestamptz`**（lead/customer/customer_identity/lifecycle_stage/lifecycle_stage_log/tag 共 10 列；`USING col AT TIME ZONE 'UTC'`，幂等可重跑；ADR-019） |
+
+> ⚠️ **aware-UTC 时间列约定（ADR-019，全 schema）**：本项目 PG 会话
+> `TimeZone = Asia/Tokyo`（JST，非 UTC）。因此：
+> 1. ORM 一律 `DateTime(timezone=True)` + `datetime.now(timezone.utc)`（**禁用
+>    `datetime.utcnow()`** —— naive 值写入 `timestamptz` 列会被按会话时区解释，
+>    产生 9h 漂移）。
+> 2. 查询窗口边界一律 aware-UTC，直接绑定 `timestamptz` 列（absolute instant）；
+>    不再做 per-table `_naive_utc` 剥离。
+> 3. 列类型改造一律 `ALTER ... TYPE timestamptz USING (col AT TIME ZONE 'UTC')`
+>    —— 裸 `CAST`/`ALTER TYPE` 在 JST 会话下会把 naive UTC 值当 JST 解释（−9h bug）。
 
 > 关键缺口与修复：`002` 的触发器循环 `for table in ['agent','account','browser_profile','proxy']`
 > 漏了 `persona`，因此 **fresh（纯 Alembic）库里原本不会有 `update_persona_updated_at`**。

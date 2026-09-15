@@ -1,5 +1,5 @@
 """Customer Model"""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import UUID, uuid4
 
@@ -24,8 +24,9 @@ class Customer(Base):
     company = Column(String(200), nullable=True)
     avatar_url = Column(String(500), nullable=True)
     extra_info = Column(JSON, nullable=True, default=dict)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # P6AN-17 P2-3: aware-UTC timestamptz (was naive timestamp + utcnow).
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # 多对多关联到标签

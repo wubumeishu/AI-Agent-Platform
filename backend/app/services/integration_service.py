@@ -4,7 +4,7 @@ Implements Lead -> Customer conversion, Customer-PrivateChannel association,
 NurturePlan application, and DealItem-Customer linkage
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional, Dict, List
 from uuid import UUID
 
@@ -115,7 +115,7 @@ async def convert_lead_to_customer(
     # 5. Link lead to customer
     lead.customer_id = customer.id
     lead.status = "converted"
-    lead.updated_at = datetime.utcnow()
+    lead.updated_at = datetime.now(timezone.utc)
     
     # 6. Associate with private channel if provided
     if channel_id:
@@ -285,7 +285,7 @@ async def associate_customer_with_channel(
     customer.extra_info["private_channel_id"] = str(channel_id)
     customer.extra_info["channel_type"] = channel.channel_type
     customer.extra_info["channel_name"] = channel.name
-    customer.updated_at = datetime.utcnow()
+    customer.updated_at = datetime.now(timezone.utc)
     
     await db.commit()
     await db.refresh(customer)

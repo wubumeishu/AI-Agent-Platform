@@ -20,6 +20,7 @@ response is stamped by the server at serve time.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
@@ -29,6 +30,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.dashboard import DashboardOverviewResponse
+from app.security.analytics_access import require_analytics_read
+from app.security.jwt_auth import PrivateDomainPrincipal
 from app.services.dashboard_cache import (
     build_cache_key,
     DEFAULT_TTL_SECONDS,
@@ -40,14 +43,30 @@ router = APIRouter(prefix="/api/v1/analytics/dashboard", tags=["Analytics Dashbo
 
 
 def _parse_moment(value: str, field: str) -> datetime:
-    """Parse an ISO-8601 timestamp (naive = UTC) into an aware datetime."""
+    """Parse an ISO-8601 timestamp (naive = UTC) into an aware datetime.
+
+    Tolerates the URL-decoding artefact where a literal ``+`` in an offset
+    (``...+00:00``) arrives as a space (``... 00:00``) — query strings are
+    %-decoded before reaching the handler. A trailing unmarked two-pair
+    clock after a space is re-prefixed with ``+``; a date-space-time input
+    (``YYYY-MM-DD HH:MM:SS``) has three clock pairs and is parsed as-is.
+    """
     try:
         dt = datetime.fromisoformat(value)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{field} must be an ISO 8601 timestamp (got {value!r})",
-        ) from exc
+    except ValueError:
+        fixed = re.sub(r"\s+(\d{2}:\d{2})$", r"+\1", value)
+        if fixed == value:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{field} must be an ISO 8601 timestamp (got {value!r})",
+            )
+        try:
+            dt = datetime.fromisoformat(fixed)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{field} must be an ISO 8601 timestamp (got {value!r})",
+            ) from exc
     if dt.tzinfo is None:
         from datetime import timezone
 
@@ -73,7 +92,13 @@ async def get_overview(
         None, max_length=50, description="Restrict conversation/message counts to one channel"
     ),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
+    # P6AN-16: scope the overview to the caller's tenant (its own agents'
+    # customers + account-owned source rows); a platform-wide actor
+    # (account_id None) is unscoped. The tenant is part of the cache key so a
+    # cached overview is never aliased across tenants.
+    tenant = principal.account_id
     start = _parse_moment(time_range_start, "time_range_start") if time_range_start else None
     end = _parse_moment(time_range_end, "time_range_end") if time_range_end else None
 
@@ -84,6 +109,7 @@ async def get_overview(
         str(days),
         str(agent_id) if agent_id else None,
         channel,
+        str(tenant) if tenant else None,
     )
     cached_raw: Optional[str] = await cache.get(key)
     if cached_raw is not None:
@@ -98,7 +124,8 @@ async def get_overview(
 
     try:
         payload = await DashboardOverviewService(db).compute(
-            start=start, end=end, days=days, agent_id=agent_id, channel=channel
+            start=start, end=end, days=days, agent_id=agent_id, channel=channel,
+            account_id=tenant,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

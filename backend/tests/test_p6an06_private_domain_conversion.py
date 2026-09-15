@@ -26,7 +26,6 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 
 from app.db.models.account import Account
 from app.db.models.agent import Agent, AgentCustomerBinding
@@ -229,6 +228,11 @@ def _make_pdc_app(captured: _CapturedService):
 
     app = FastAPI(title="P6AN-06 PDC-only app")
     app.include_router(pdc_router)
+    # P6AN-16: the analytics surface now requires an authenticated principal.
+    # Functional tests exercise PDC behavior with a platform-wide admin
+    # principal (no tenant scoping) to preserve the legacy unscoped semantics.
+    from app.security.analytics_access import override_analytics_auth, test_principal
+    override_analytics_auth(app, test_principal(role="admin"))
     app.dependency_overrides[get_db] = lambda: object()
     return app
 
@@ -375,7 +379,7 @@ async def test_pdc_full_funnel_no_filters_on_live_db():
     agent-scoped (bound customers) so the denominator is a clean, small set
     rather than the whole (polluted) customer table.
     """
-    eng = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
+    eng = create_async_engine(TEST_DATABASE_URL, echo=False)
     Session = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
     seed = _Seed()
     async with Session() as db:
@@ -418,7 +422,7 @@ async def test_pdc_full_funnel_no_filters_on_live_db():
 @pytest.mark.asyncio
 async def test_pdc_agent_filter_scopes_funnel_and_ltv():
     """With agent_id set, the funnel + LTV scope to the agent's bound customers."""
-    eng = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
+    eng = create_async_engine(TEST_DATABASE_URL, echo=False)
     Session = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
     seed = _Seed()
     async with Session() as db:
@@ -450,7 +454,7 @@ async def test_pdc_agent_filter_scopes_funnel_and_ltv():
 async def test_pdc_account_filter_scopes_account_owned_sources():
     """With account_id set to a DIFFERENT (empty) account, the seeded
     account-owned sources do NOT count, isolating the account scoping."""
-    eng = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
+    eng = create_async_engine(TEST_DATABASE_URL, echo=False)
     Session = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
     seed = _Seed()
     async with Session() as db:
@@ -488,7 +492,7 @@ async def test_pdc_account_filter_scopes_account_owned_sources():
 @pytest.mark.asyncio
 async def test_pdc_window_excludes_out_of_window_rows():
     """An out-of-window won deal (created before ``since``) must not count."""
-    eng = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
+    eng = create_async_engine(TEST_DATABASE_URL, echo=False)
     Session = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
     seed = _Seed()
     async with Session() as db:
@@ -529,101 +533,116 @@ async def _seed_source_graph(db: AsyncSession, seed: _Seed, T: datetime,
       follow_up_task (account A):
         completed x3, pending x2, in_progress x1, cancelled x1
     """
+    # Parent rows (need PKs for their children).
     plat = Platform(code=f"p6an06-{uuid4().hex[:8]}", name="p6an06-test")
     db.add(plat)
     await db.flush()
-    seed.ids["platforms"].append(plat.id)
 
     acct = Account(platform_id=plat.id, name="p6an06-account")
     db.add(acct)
     await db.flush()
-    seed.ids["accounts"].append(acct.id)
     seed.account_id = acct.id
 
     # --- customers ---
     cust = {}
+    cust_objs = {}
     for n in ("c1", "c2", "c3", "c4", "c5"):
         c = Customer(name=f"p6an06-{n}")
         db.add(c)
-        await db.flush()
-        seed.ids["customers"].append(c.id)
-        cust[n] = c.id
+        cust_objs[n] = c
     c6 = Customer(name="p6an06-c6")
     c6.is_deleted = True
     db.add(c6)
-    await db.flush()
-    seed.ids["customers"].append(c6.id)
-    seed.customers.update({k: v for k, v in cust.items()})
+    await db.flush()  # customer PKs populate now
+    for n in ("c1", "c2", "c3", "c4", "c5"):
+        cust[n] = cust_objs[n].id
+    seed.customers.update(cust)
 
     # --- agent + bindings (A -> c1,c2,c3) ---
     agent = Agent(name="p6an06-agent")
     db.add(agent)
     await db.flush()
-    seed.ids["agents"].append(agent.id)
     seed.agent_id = agent.id
+    bindings = []
     for n in ("c1", "c2", "c3"):
         b = AgentCustomerBinding(agent_id=agent.id, customer_id=cust[n])
         db.add(b)
-        await db.flush()
-        seed.ids["bindings"].append(b.id)
+        bindings.append(b)
+
+    # P6AN-16 tenancy wiring: the account owns the agent through
+    # agent_persona_binding (account -> agent -> customer). Without this link
+    # the caller's account has no visible agents/customers, so a tenant-scoped
+    # read would be empty. Seed a minimal persona + binding so the tenancy
+    # model (account -> agent -> customer) is faithfully represented.
+    from app.db.models.account import AgentPersonaBinding
+    from app.db.models.persona import Persona
+
+    persona = Persona(name="p6an06-persona")
+    db.add(persona)
+    await db.flush()
+    apb = AgentPersonaBinding(
+        account_id=acct.id, agent_id=agent.id, persona_id=persona.id
+    )
+    db.add(apb)
 
     # --- conversations ---
-    conv = {}
+    conv_objs = {}
     for n in ("c1", "c2", "c5"):
         cv = Conversation(customer_id=cust[n], channel="wechat",
                          subject=f"p6an06-{n}")
         db.add(cv)
-        await db.flush()
-        seed.ids["conversations"].append(cv.id)
-        conv[n] = cv.id
+        conv_objs[n] = cv
 
     # --- messages ---
-    async def _msg(convn, direction, status, created=T):
+    def _add_msg(convn, direction, status, created=T):
         m = ChannelMessage(
-            conversation_id=conv[convn], direction=direction, status=status,
+            conversation_id=conv_objs[convn].id,  # flushed below
+            direction=direction, status=status,
             content={"text": "p6an06"}, created_at=created, updated_at=created,
+            account_id=acct.id,
         )
         db.add(m)
-        await db.flush()
-        seed.ids["messages"].append(m.id)
         return m
 
-    await _msg("c1", "out", "sent")
-    await _msg("c1", "out", "sent")
-    await _msg("c1", "in", "read")
-    await _msg("c1", "out", "failed")     # not reached (failed)
-    await _msg("c1", "out", "queued")      # not reached (not dispatched)
-    await _msg("c2", "out", "delivered")
-    await _msg("c2", "in", "read")
-    await _msg("c5", "out", "sent", created=_T_OUT)  # OUT-OF-WINDOW
+    # flush conversations first so messages can reference their real ids
+    await db.flush()
+    msgs = [
+        _add_msg("c1", "out", "sent"),
+        _add_msg("c1", "out", "sent"),
+        _add_msg("c1", "in", "read"),
+        _add_msg("c1", "out", "failed"),     # not reached (failed)
+        _add_msg("c1", "out", "queued"),      # not reached (not dispatched)
+        _add_msg("c2", "out", "delivered"),
+        _add_msg("c2", "in", "read"),
+        _add_msg("c5", "out", "sent", created=_T_OUT),  # OUT-OF-WINDOW
+    ]
 
     # --- deals ---
     pipe = DealPipeline(account_id=acct.id, name="p6an06-pipeline")
     db.add(pipe)
     await db.flush()
-    seed.ids["pipelines"].append(pipe.id)
+    deals = []
 
-    async def _deal(custn, status, value, created=T, name=None):
+    def _make_deal(custn, status, value, created=T):
         d = DealItem(
             pipeline_id=pipe.id, account_id=acct.id, customer_id=cust[custn],
             status=status, value=value, currency="CNY",
-            name=name or f"p6an06-deal-{custn}-{status}",
+            name=f"p6an06-deal-{custn}-{status}",
             created_at=created, updated_at=created,
         )
         db.add(d)
-        await db.flush()
-        seed.ids["deals"].append(d.id)
-        return d
+        deals.append(d)
 
-    await _deal("c1", "won", 10000)
-    await _deal("c2", "won", 5000)
-    await _deal("c3", "won", 3000)
-    await _deal("c4", "won", 7000)
-    await _deal("c1", "lost", 12000)     # lost -> excluded from won aggregate
+    _make_deal("c1", "won", 10000)
+    _make_deal("c2", "won", 5000)
+    _make_deal("c3", "won", 3000)
+    _make_deal("c4", "won", 7000)
+    _make_deal("c1", "lost", 12000)     # lost -> excluded from won aggregate
     if out_of_window_deal_value:
-        await _deal("c1", "won", out_of_window_deal_value, created=_T_OUT)
+        _make_deal("c1", "won", out_of_window_deal_value, created=_T_OUT)
 
     # --- nurture step executions ---
+    nses = []
     for status in ("success", "success", "failed", "dead_letter", "skipped",
                    "pending", "running"):
         n = NurtureStepExecution(
@@ -631,10 +650,10 @@ async def _seed_source_graph(db: AsyncSession, seed: _Seed, T: datetime,
             created_at=T, updated_at=T,
         )
         db.add(n)
-        await db.flush()
-        seed.ids["nse"].append(n.id)
+        nses.append(n)
 
     # --- follow-up tasks ---
+    fus = []
     for status in ("completed", "completed", "completed", "pending", "pending",
                    "in_progress", "cancelled"):
         t = FollowUpTask(
@@ -642,7 +661,20 @@ async def _seed_source_graph(db: AsyncSession, seed: _Seed, T: datetime,
             title="p6an06-fu", status=status, created_at=T, updated_at=T,
         )
         db.add(t)
-        await db.flush()
-        seed.ids["fu"].append(t.id)
+        fus.append(t)
 
+    # One final flush (every child PK populates), then record the real ids.
+    await db.flush()
+    seed.ids["platforms"].append(plat.id)
+    seed.ids["accounts"].append(acct.id)
+    seed.ids["customers"].extend(cust_objs[n].id for n in cust_objs)
+    seed.ids["customers"].append(c6.id)
+    seed.ids["agents"].append(agent.id)
+    seed.ids["bindings"].extend(b.id for b in bindings)
+    seed.ids["conversations"].extend(cv.id for cv in conv_objs.values())
+    seed.ids["messages"].extend(m.id for m in msgs)
+    seed.ids["pipelines"].append(pipe.id)
+    seed.ids["deals"].extend(d.id for d in deals)
+    seed.ids["nse"].extend(n.id for n in nses)
+    seed.ids["fu"].extend(t.id for t in fus)
     await db.commit()

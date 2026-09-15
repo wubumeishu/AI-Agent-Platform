@@ -24,7 +24,7 @@ without a database (repo convention, cf. P6AN-01 fake-session tests).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
@@ -35,6 +35,7 @@ from app.db.models.agent import Agent, AgentCustomerBinding
 from app.db.models.conversation import Conversation
 from app.db.models.lead import Lead
 from app.db.models.lifecycle import LifecycleStageLog
+from app.security.analytics_access import tenant_customer_subquery
 
 #: Funnel order for the lead status state machine.
 FUNNEL_ORDER: Tuple[str, ...] = ("new", "contacted", "qualified", "converted")
@@ -48,6 +49,24 @@ DIRECT_CHANNEL = "direct"
 UNASSIGNED_AGENT = "unassigned"
 #: Lifecycle stage code meaning "deal closed".
 CLOSED_STAGE_CODE = "成交"
+
+
+def _coerce_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Normalise a query-bound datetime to **aware UTC**.
+
+    P6AN-17 P2-3 (DEF-3 root cause): ``Lead.created_at`` / ``Lead.updated_at``
+    are aware-UTC ``timestamptz`` columns. A naive bound binds to them under
+    the *session* timezone (e.g. Asia/Tokyo here), silently shifting the window
+    by the offset — or raising on strict drivers. Normalising every bound to
+    aware UTC up front makes the window an absolute instant, independent of
+    the server's ``TimeZone``. Naive inputs are treated as UTC (a documented,
+    lossless assumption); aware inputs are converted to UTC.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 class LeadConversionError(Exception):
@@ -152,7 +171,12 @@ class LeadConversionService:
 
     @staticmethod
     def _base_where(agent_id: Optional[UUID], channel: Optional[str],
-                    from_date: Optional[datetime], to_date: Optional[datetime]) -> List:
+                    from_date: Optional[datetime], to_date: Optional[datetime],
+                    account_id: Optional[UUID] = None) -> List:
+        # P6AN-17 P2-3: Lead.created_at is timestamptz — coerce every bound to
+        # aware UTC so the window is an absolute instant (session-tz independent).
+        from_date = _coerce_aware_utc(from_date)
+        to_date = _coerce_aware_utc(to_date)
         criteria: List[Any] = [Lead.is_deleted == False]  # noqa: E712
         if from_date is not None:
             criteria.append(Lead.created_at >= from_date)
@@ -165,6 +189,11 @@ class LeadConversionService:
             # conversation join makes non-conversation leads NULL, and the
             # equality filter excludes them.
             criteria.append(Conversation.channel == channel)
+        if account_id is not None:
+            # P6AN-16: tenant sees only leads of its own customers.
+            criteria.append(
+                Lead.customer_id.in_(tenant_customer_subquery(account_id))
+            )
         return criteria
 
     def _apply_joins(self, q: Any, agent_group: bool, channel_group: bool,
@@ -207,8 +236,13 @@ class LeadConversionService:
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         group_by: str = "overall",
+        account_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """Compute the lead-conversion report.
+
+        P6AN-16: when ``account_id`` (the caller's tenant, from the token) is
+        set, every lead aggregation is restricted to that tenant's customers,
+        so one tenant can never read another tenant's conversion funnel.
 
         Returns a dict shaped like
         ``app.schemas.lead_conversion.LeadConversionResponse``:
@@ -227,7 +261,13 @@ class LeadConversionService:
                 f"invalid group_by {group_by!r}; expected overall/agent/channel"
             )
 
-        where = self._base_where(agent_id, channel, from_date, to_date)
+        # P6AN-17 P2-3: coerce the raw request bounds to aware UTC so every
+        # query (window filter in _base_where AND cycle-sample filter below)
+        # binds the same absolute instants to the timestamptz column.
+        from_date = _coerce_aware_utc(from_date)
+        to_date = _coerce_aware_utc(to_date)
+
+        where = self._base_where(agent_id, channel, from_date, to_date, account_id)
         gkey = self._group_key(group_by)
 
         # ---- Query 1: distinct-lead counts per status (overall) ----
@@ -282,6 +322,9 @@ class LeadConversionService:
             cq = cq.where(AgentCustomerBinding.agent_id == agent_id)
         if channel is not None:
             cq = cq.where(Conversation.channel == channel)
+        if account_id is not None:
+            # P6AN-16: tenant sees only cycle samples for its own customers.
+            cq = cq.where(Lead.customer_id.in_(tenant_customer_subquery(account_id)))
         cq = cq.group_by(Lead.id, Lead.created_at, Lead.updated_at)
         if gkey is not None:
             cq = cq.group_by(gkey)
@@ -292,11 +335,13 @@ class LeadConversionService:
         group_cycles: Dict[str, List[float]] = {}
         for row in rows:
             ts = row.stage_ts if row.stage_ts is not None else row.updated_at
-            # Lead/lifecycle timestamps are naive UTC (datetime.utcnow
-            # defaults); normalize defensively before subtracting.
-            if ts.tzinfo is not None:
-                ts = ts.replace(tzinfo=None)
-            days = max(0.0, (ts - row.created_at).total_seconds() / 86400.0)
+            # P6AN-17 P2-3: Lead/LifecycleStageLog timestamps are now aware-UTC
+            # ``timestamptz``. Normalise both ends of the subtraction to aware
+            # UTC so the difference is a pure elapsed-time computation (naive/
+            # aware mixing would otherwise raise TypeError).
+            stage_ts = _coerce_aware_utc(ts)
+            created_ts = _coerce_aware_utc(row.created_at)
+            days = max(0.0, (stage_ts - created_ts).total_seconds() / 86400.0)
             # A lead bound to two agents appears twice (once per binding);
             # the overall average counts each lead exactly once.
             if row.id not in seen_leads:
@@ -324,6 +369,7 @@ class LeadConversionService:
         return {
             "filters": {
                 "agent_id": str(agent_id) if agent_id else None,
+                "account_id": str(account_id) if account_id else None,
                 "channel": channel,
                 "from_date": from_date,
                 "to_date": to_date,

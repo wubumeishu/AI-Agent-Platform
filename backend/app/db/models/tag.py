@@ -1,5 +1,5 @@
 """Tag Model with associations and hierarchy support"""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import UUID, uuid4
 
@@ -40,7 +40,8 @@ class Tag(Base):
     description = Column(Text, nullable=True)
     parent_id = Column(PGUUID(as_uuid=True), ForeignKey("tag.id", ondelete="SET NULL"), nullable=True)
     usage_count = Column(Integer, nullable=False, default=0)  # 使用次数（统计用）
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    # P6AN-17 P2-3: aware-UTC timestamptz (was naive timestamp + utcnow).
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # 自引用父子关系

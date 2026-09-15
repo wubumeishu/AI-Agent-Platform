@@ -46,11 +46,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS
+# CORS (P2-4 / P6AN-16): an explicit origin *whitelist* instead of a wildcard.
+# The previous ``allow_origins=["*"] + allow_credentials=True`` is a
+# browser-rejected antipattern that widened the cross-origin surface of the
+# (then-unauthenticated) analytics endpoints. Origins come from
+# ``CORS_ORIGINS`` (env); credentials are allowed only when the list is an
+# explicit whitelist, never a wildcard. See ``app.config.cors_origins``.
+from app.config import cors_allow_credentials, cors_origins  # noqa: E402
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins(),
+    allow_credentials=cors_allow_credentials(),
     allow_methods=["*"],
     allow_headers=["*"],
 )

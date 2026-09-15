@@ -327,6 +327,12 @@ def _make_roi_app(captured: _CapturedService):
 
     app = FastAPI(title="P6AN-09 ROI-only app")
     app.include_router(roi_router)
+    # P6AN-16: the analytics surface now requires an authenticated principal.
+    # Functional tests exercise ROI behavior with a platform-wide admin
+    # principal (no tenant scoping) to preserve the legacy unscoped semantics
+    # (the captured service then receives account_id=None as before).
+    from app.security.analytics_access import override_analytics_auth, test_principal
+    override_analytics_auth(app, test_principal(role="admin"))
     app.dependency_overrides[get_db] = lambda: object()
     return app
 

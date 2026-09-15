@@ -236,3 +236,44 @@ def roi_cost_rates() -> Dict[str, int]:
         "cost_per_active_agent_cents": _cents_env("ROI_COST_PER_ACTIVE_AGENT_CENTS", 0),
         "cost_per_campaign_lead_cents": _cents_env("ROI_COST_PER_CAMPAIGN_LEAD_CENTS", 0),
     }
+
+
+# ==========================================================================
+# CORS whitelist (P2-4)
+# ==========================================================================
+# The app previously shipped ``CORSMiddleware(allow_origins=["*"],
+# allow_credentials=True)`` — a wildcard origin combined with credentialed
+# requests is a browser-rejected antipattern that, on top of the now-fixed
+# unauthenticated analytics surface, widened the cross-origin leakage surface.
+# CORS is now an explicit, env-driven origin *whitelist*: set
+# ``CORS_ORIGINS`` to a comma-separated list of allowed origins for a
+# deployment. When unset, a local/dev default (the Vite frontend) is used so
+# the dev experience keeps working without anyone opening the config.
+
+#: Dev-friendly default — the local Vite frontend ports. Not a wildcard: a
+#: credentialed request will never be cross-origin from ``*`` anymore.
+_DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+
+
+def cors_origins() -> list:
+    """The explicit CORS origin whitelist (P2-4).
+
+    Reads ``CORS_ORIGINS`` (comma-separated, blank entries ignored) and falls
+    back to the local dev defaults when unset/empty. Never returns ``["*"]``:
+    a deployment that truly needs a broad surface should enumerate origins.
+    """
+    raw = os.getenv("CORS_ORIGINS", "").strip()
+    if not raw:
+        raw = _DEFAULT_CORS_ORIGINS
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+def cors_allow_credentials() -> bool:
+    """Whether credentialed CORS requests are permitted.
+
+    Credentials are allowed only when the origin list is an explicit
+    whitelist (never a wildcard) — the combination that keeps a credentialed
+    cross-origin request safe and browser-compatible.
+    """
+    return "*" not in cors_origins()
+

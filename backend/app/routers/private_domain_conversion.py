@@ -26,6 +26,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.private_domain_conversion import PDCResponse
+from app.security.analytics_access import (
+    resolve_account_param,
+    require_analytics_read,
+)
+from app.security.jwt_auth import (
+    AccountOwnershipError,
+    PrivateDomainPrincipal,
+)
 from app.services.private_domain_conversion import PrivateDomainConversionService
 
 router = APIRouter(
@@ -65,7 +73,9 @@ async def get_private_domain_conversion(
     account_id: Optional[UUID] = Query(
         None,
         description="Scope account-owned sources (messages / deals / follow-ups "
-                    "/ nurture executions) to one account. Omit for all.",
+                    "/ nurture executions) to one account. Omit for all. "
+                    "P6AN-16: for a tenant this is forced to the caller's own "
+                    "account (the token's account_id); a different id is a 403.",
     ),
     since: Optional[str] = Query(
         None,
@@ -78,6 +88,7 @@ async def get_private_domain_conversion(
                     "defaults to the last 30 days.",
     ),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     """Compute the private-domain conversion funnel + LTV proxy + completion rates.
 
@@ -85,14 +96,34 @@ async def get_private_domain_conversion(
     conversation, deal_item, nurture_step_execution, follow_up_task). No write,
     no new table — the data口径 is documented in
     ``docs/P6AN-06-private-domain-conversion-api.md``.
+
+    P6AN-16: scoped to the caller's tenant. The ``account_id`` is authoritative
+    from the token; a tenant that passes another account's id gets a 403
+    (cross-tenant read attempt), and a plain tenant operator is restricted to
+    its own account's data.
     """
     since_dt = _parse_window_bound("since", since)
     until_dt = _parse_window_bound("until", until)
 
+    # P6AN-16: resolve the authoritative account scope from the token. A tenant
+    # may only scope to its own account; a cross-tenant param raises
+    # AccountOwnershipError (403). Map it locally so standalone / test apps
+    # (without main.py's global handler) also return a 403, never a 500.
+    try:
+        tenant_account = resolve_account_param(account_id, principal)
+    except AccountOwnershipError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": 403, "message": str(exc), "data": None},
+        ) from exc
+
     svc = PrivateDomainConversionService(db)
+    # P6AN-16: the service scopes account-owned source rows to ``tenant_account``
+    # and, when an agent_id is supplied alongside a tenant, restricts the agent
+    # dimension to the tenant's own agents (no cross-tenant agent data).
     return await svc.get_conversion(
         agent_id=agent_id,
-        account_id=account_id,
+        account_id=tenant_account,
         since=since_dt,
         until=until_dt,
     )

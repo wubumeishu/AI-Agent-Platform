@@ -38,6 +38,14 @@ from uuid import UUID
 from app.config import roi_cost_rates
 from app.db.session import get_db
 from app.schemas.roi_analysis import ROIResponse
+from app.security.analytics_access import (
+    resolve_account_param,
+    require_analytics_read,
+)
+from app.security.jwt_auth import (
+    AccountOwnershipError,
+    PrivateDomainPrincipal,
+)
 from app.services.roi_analysis import DIMENSIONS, ROIService
 
 router = APIRouter(
@@ -94,6 +102,7 @@ async def get_roi(
                     "defaults to the last 30 days.",
     ),
     db: AsyncSession = Depends(get_db),
+    principal: PrivateDomainPrincipal = Depends(require_analytics_read),
 ):
     """Compute the ROI report for one dimension (read-only aggregation).
 
@@ -101,6 +110,12 @@ async def get_roi(
     operations cost-proxy (env rates via ``roi_cost_rates``). The data口径 is
     documented in ``docs/P6AN-09-roi-analysis-api.md``. No write, no new
     table — it aggregates the existing Phase-4 / Phase-5 source tables.
+
+    P6AN-16: scoped to the caller's tenant. The ``account_id`` is authoritative
+    from the token; a tenant that passes another account's id gets a 403
+    (cross-tenant read attempt). A plain tenant operator is restricted to its
+    own account's data (agent / campaign dimensions are scoped to the tenant's
+    agents' customers + account-owned source rows).
     """
     if dimension not in DIMENSIONS:
         # The Query pattern normally rejects this; keep a service-side guard so
@@ -113,11 +128,23 @@ async def get_roi(
     since_dt = _parse_window_bound("since", since)
     until_dt = _parse_window_bound("until", until)
 
+    # P6AN-16: resolve the authoritative account scope from the token. A tenant
+    # may only scope to its own account; a cross-tenant param raises
+    # AccountOwnershipError (403). Mapped locally so standalone / test apps
+    # (without main.py's global handler) also return a 403, never a 500.
+    try:
+        tenant_account = resolve_account_param(account_id, principal)
+    except AccountOwnershipError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": 403, "message": str(exc), "data": None},
+        ) from exc
+
     svc = ROIService(db)
     return await svc.get_roi(
         dimension=dimension,
         agent_id=agent_id,
-        account_id=account_id,
+        account_id=tenant_account,
         since=since_dt,
         until=until_dt,
         rates=roi_cost_rates(),

@@ -113,8 +113,14 @@ def _coerce_aware(dt: Optional[datetime]) -> Optional[datetime]:
 
 
 def _naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
-    """Strip tzinfo to a naive-UTC wall clock (for naive-timestamp columns like
-    ``lead.created_at`` — exact for aware-UTC inputs). Mirrors P6AN-07."""
+    """[Deprecated / kept for API compat] Strip tzinfo to a naive-UTC wall clock.
+
+    P6AN-17 P2-3 unified the Phase 1-5 source columns (``lead`` / ``customer``
+    / ...) to aware-UTC ``timestamptz``; window bounds are now bound directly
+    as absolute instants, so this helper is no longer used for lead/customer
+    filtering. Retained so external importers (tests, downstream modules) do
+    not break.
+    """
     return dt.replace(tzinfo=None) if dt is not None else None
 
 
@@ -211,16 +217,30 @@ class ROIService:
         return raw
 
     async def collect_raw_agent(
-        self, since: datetime, until: datetime
+        self, since: datetime, until: datetime,
+        account_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
-        """Per-agent raw volumes + revenue (grouped by agent)."""
+        """Per-agent raw volumes + revenue (grouped by agent).
+
+        P6AN-16: when ``account_id`` (the caller's tenant) is set, only that
+        tenant's own agents are included in the agent-dimension report.
+        """
         db = self.db
+        tenant_agents = None
+        if account_id is not None:
+            from app.security.analytics_access import tenant_agent_subquery
+            tenant_agents = tenant_agent_subquery(account_id)
+
         # (1) won revenue per agent via bound customers.
         bound = (
             select(AgentCustomerBinding.agent_id, AgentCustomerBinding.customer_id)
             .where(AgentCustomerBinding.is_deleted.is_(False))
-            .subquery()
         )
+        if tenant_agents is not None:
+            bound = bound.where(
+                AgentCustomerBinding.agent_id.in_(tenant_agents)
+            )
+        bound = bound.subquery()
         rev_q = (
             select(
                 bound.c.agent_id,
@@ -264,13 +284,17 @@ class ROIService:
             )
             .group_by(ChannelMessage.agent_id)
         )
+        if tenant_agents is not None:
+            msg_q = msg_q.where(ChannelMessage.agent_id.in_(tenant_agents))
         msgs: Dict[UUID, int] = {}
         for r in (await db.execute(msg_q)).all():
             msgs[r.agent_id] = int(r.n or 0)
 
         # (3) the set of live agents (so a zero-activity agent still appears).
-        agents = list((await db.execute(select(Agent.id, Agent.name).where(
-            Agent.is_deleted.is_(False)))).all())
+        agents_q = select(Agent.id, Agent.name).where(Agent.is_deleted.is_(False))
+        if tenant_agents is not None:
+            agents_q = agents_q.where(Agent.id.in_(tenant_agents))
+        agents = list((await db.execute(agents_q)).all())
 
         return {
             "revenue": revenue,
@@ -281,17 +305,27 @@ class ROIService:
         }
 
     async def collect_raw_campaign(
-        self, since: datetime, until: datetime
+        self, since: datetime, until: datetime,
+        account_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """Per-campaign raw volumes + revenue (grouped by lead source_id).
 
         A *campaign* is a distinct ``lead.source_id`` among live leads with
         ``source_type == 'campaign'``. Revenue is the won value of the deals
         linked to that campaign's leads (``deal_item.lead_id``).
+
+        P6AN-16: when ``account_id`` (the caller's tenant) is set, campaign
+        leads are restricted to that tenant's customers.
         """
         db = self.db
-        # (1) distinct campaigns + their lead counts (naive-timestamp window).
-        lead_since, lead_until = _naive_utc(since), _naive_utc(until)
+        # P6AN-16 tenant scope: campaign leads belong to the tenant's customers.
+        tenant_cust = None
+        if account_id is not None:
+            from app.security.analytics_access import tenant_customer_subquery
+            tenant_cust = Lead.customer_id.in_(tenant_customer_subquery(account_id))
+        # P6AN-17 P2-3: lead.created_at is now aware-UTC timestamptz, so bind
+        # the aware-UTC window bounds directly (no naive stripping).
+        lead_since, lead_until = since, until
         camp_q = (
             select(
                 Lead.source_id,
@@ -306,6 +340,8 @@ class ROIService:
             )
             .group_by(Lead.source_id)
         )
+        if tenant_cust is not None:
+            camp_q = camp_q.where(tenant_cust)
         campaigns: Dict[str, int] = {}
         for r in (await db.execute(camp_q)).all():
             campaigns[str(r.source_id)] = int(r.n or 0)
@@ -320,6 +356,8 @@ class ROIService:
                 Lead.created_at >= lead_since,
                 Lead.created_at < lead_until,
             )
+            if tenant_cust is not None:
+                lead_ids_q = lead_ids_q.where(tenant_cust)
             ids_by_campaign[sid] = list((await db.execute(lead_ids_q)).scalars().all())
 
         # (3) won revenue per campaign via deal_item.lead_id IN (...).
@@ -720,12 +758,15 @@ class ROIService:
                 agent_id, account_id, filters,
             )
         if dimension == "agent":
-            raw = await self.collect_raw_agent(win_since, win_until)
+            # P6AN-16: the agent dimension is scoped to the caller's tenant
+            # (its own agents). A tenant can never read another tenant's
+            # agent-level revenue / message volumes.
+            raw = await self.collect_raw_agent(win_since, win_until, account_id)
             return self.assemble_agent(
                 raw, rates, win_since, win_until, default_applied,
                 agent_id, account_id, filters,
             )
-        raw = await self.collect_raw_campaign(win_since, win_until)
+        raw = await self.collect_raw_campaign(win_since, win_until, account_id)
         return self.assemble_campaign(
             raw, rates, win_since, win_until, default_applied,
             agent_id, account_id, filters,
