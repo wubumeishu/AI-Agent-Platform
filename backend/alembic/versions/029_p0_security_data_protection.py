@@ -79,6 +79,27 @@ def _bind_pii_encryption() -> None:
     return encrypt_field, encrypt_bytes, hash_password
 
 
+def _col_exists(bind, table: str, column: str) -> bool:
+    """Live (transaction-aware) check: does ``table.column`` exist right now?
+
+    Guards the legacy production ``create_all`` fork, where the
+    ``private_channel.contact_info`` column (a Phase-5 resource-layer column)
+    was never created because the fork predates that model revision. On a
+    fresh ORM-created database every column here exists, so the guard is a
+    no-op there — behaviour is unchanged on the canonical path.
+    """
+    val = bind.execute(
+        sa.text(
+            "SELECT EXISTS("
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = :t "
+            "AND column_name = :c)"
+        ),
+        {"t": table, "c": column},
+    ).scalar()
+    return bool(val)
+
+
 def upgrade() -> None:
     # ------------------------------------------------------------------
     # 1. audit_log (P1-1). Unconstrained UUID refs (020/026 precedent).
@@ -131,13 +152,16 @@ def upgrade() -> None:
         "ALTER TABLE customer_identity ALTER COLUMN external_id "
         "TYPE text USING external_id::text"
     )
-    op.execute(
-        "ALTER TABLE private_channel ALTER COLUMN contact_info "
-        "TYPE text USING contact_info::text"
-    )
-
     encrypt_field, encrypt_bytes, _hash = _bind_pii_encryption()
     bind = op.get_bind()
+
+    # ``private_channel.contact_info`` is a Phase-5 resource-layer column
+    # (``EncryptedJSON``). The legacy production ``create_all`` fork predates
+    # it, so on that DB the column is absent and the unconditional
+    # ``ALTER ... TYPE text`` below would crash (UndefinedColumn). Guard the
+    # column-specific PII steps with a live existence check; the canonical
+    # (fresh ORM) path always has the column, so behaviour is unchanged there.
+    pc_has_contact_info = _col_exists(bind, "private_channel", "contact_info")
 
     # customer.email / phone
     rows = bind.execute(
@@ -173,25 +197,31 @@ def upgrade() -> None:
                 {"v": encrypt_field(value), "id": _id},
             )
 
-    # private_channel.contact_info: JSON document -> whole-document token
-    rows = bind.execute(
-        sa.text(
-            "SELECT id, contact_info FROM private_channel "
-            "WHERE contact_info IS NOT NULL AND contact_info NOT LIKE 'A1$%'"
+    # private_channel.contact_info: JSON document -> whole-document token.
+    # Only on schemas where the column exists (see guard above).
+    if pc_has_contact_info:
+        op.execute(
+            "ALTER TABLE private_channel ALTER COLUMN contact_info "
+            "TYPE text USING contact_info::text"
         )
-    ).fetchall()
-    for _id, raw in rows:
-        # ``raw`` may be a JSONB python object (already decoded) or a str.
-        if isinstance(raw, (dict, list)):
-            import json as _json
+        rows = bind.execute(
+            sa.text(
+                "SELECT id, contact_info FROM private_channel "
+                "WHERE contact_info IS NOT NULL AND contact_info NOT LIKE 'A1$%'"
+            )
+        ).fetchall()
+        for _id, raw in rows:
+            # ``raw`` may be a JSONB python object (already decoded) or a str.
+            if isinstance(raw, (dict, list)):
+                import json as _json
 
-            token = encrypt_bytes(_json.dumps(raw, ensure_ascii=False, sort_keys=True).encode("utf-8"))
-        else:
-            token = encrypt_bytes(str(raw).encode("utf-8"))
-        bind.execute(
-            sa.text("UPDATE private_channel SET contact_info = :v WHERE id = :id"),
-            {"v": token, "id": _id},
-        )
+                token = encrypt_bytes(_json.dumps(raw, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+            else:
+                token = encrypt_bytes(str(raw).encode("utf-8"))
+            bind.execute(
+                sa.text("UPDATE private_channel SET contact_info = :v WHERE id = :id"),
+                {"v": token, "id": _id},
+            )
 
     # ------------------------------------------------------------------
     # 3. Credentials: hash legacy plaintext rows (one-way, F-3).
@@ -213,7 +243,11 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Restore original column widths; backfilled A1$ tokens are left as-is
     # (the app read path still decrypts them).
-    op.alter_column("private_channel", "contact_info", type_=postgresql.JSONB(astext_type=sa.Text()), nullable=True, existing_type=sa.Text())
+    bind = op.get_bind()
+    # ``private_channel.contact_info`` may be absent on the legacy production
+    # fork (guarded in upgrade), so only restore its width when it exists.
+    if _col_exists(bind, "private_channel", "contact_info"):
+        op.alter_column("private_channel", "contact_info", type_=postgresql.JSONB(astext_type=sa.Text()), nullable=True, existing_type=sa.Text())
     op.alter_column("customer_identity", "external_id", type_=sa.String(length=500), nullable=True, existing_type=sa.Text())
     op.alter_column("customer_identity", "email", type_=sa.String(length=200), nullable=True, existing_type=sa.Text())
     op.alter_column("customer_identity", "phone", type_=sa.String(length=50), nullable=True, existing_type=sa.Text())
