@@ -201,7 +201,7 @@ Customer
 
 ### Phase 4  CRM
 
-> Status (2026-09-14): CRM / Lead implementation layer complete (Customer, CustomerIdentity, Lead + Intent Scoring, Tags, Lifecycle, Customer 360, integrations; 13/14 board tasks done). Open P0 follow-ups: prod DB missing 7 CRM tables, security (auth/RBAC + PII masking, ADR-011), E2E re-run pending. See docs/PHASE-3-SUMMARY.md.
+> Status (2026-09-14): CRM / Lead implementation layer complete (Customer, CustomerIdentity, Lead + Intent Scoring, Tags, Lifecycle, Customer 360, integrations; 13/14 board tasks done). Open P0 follow-ups: prod DB missing 7 CRM tables, security (auth/RBAC + PII masking, ADR-011), E2E re-run pending. See docs/phases/PHASE-3-SUMMARY.md.
 
 - Customer
 - Lead
@@ -221,7 +221,7 @@ Customer
 
 ### Phase 6 — Analytics
 
-> Status (2026-09-15): Phase 6 Analytics & Optimization complete (9 backend + 3 frontend cards). E2E QA P6AN-15 verdict PASS; architecture review P6AN-16 verdict CHANGES_REQUIRED (no P0; P1 analytics-surface auth/tenant isolation FIXED in t_3e806a29 = ADR-018, with P2-4 CORS whitelist; P2-1/2/3/5 filed as P2 follow-up cards P6AN-17). See docs/PHASE-6-SUMMARY.md.
+> Status (2026-09-15): Phase 6 Analytics & Optimization complete (9 backend + 3 frontend cards). E2E QA P6AN-15 verdict PASS; architecture review P6AN-16 verdict CHANGES_REQUIRED (no P0; P1 analytics-surface auth/tenant isolation FIXED in t_3e806a29 = ADR-018, with P2-4 CORS whitelist; P2-1/2/3/5 filed as P2 follow-up cards P6AN-17). See docs/phases/PHASE-6-SUMMARY.md.
 
 - Dashboard
 - Conversion

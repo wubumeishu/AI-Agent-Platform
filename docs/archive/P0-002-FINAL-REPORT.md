@@ -104,11 +104,11 @@ $ curl http://localhost:5173/
 
 | 文件 | 路径 |
 |------|------|
-| 审计报告 | `docs/AUDIT-P0-002.md` |
-| QA 报告（初始） | `docs/QA-REPORT-P0-002.md` |
-| QA 报告（补充） | `docs/QA-REPORT-P0-002-SUPPLEMENT.md` |
-| Reviewer 报告 | `docs/REVIEWER-REPORT-P0-002.md` |
-| 最终报告 | `docs/P0-002-FINAL-REPORT.md` |
+| 审计报告 | `docs/qa-reviews/AUDIT-P0-002.md` |
+| QA 报告（初始） | `docs/qa-reviews/QA-REPORT-P0-002.md` |
+| QA 报告（补充） | `docs/qa-reviews/QA-REPORT-P0-002-SUPPLEMENT.md` |
+| Reviewer 报告 | `docs/qa-reviews/REVIEWER-REPORT-P0-002.md` |
+| 最终报告 | `docs/archive/P0-002-FINAL-REPORT.md` |
 
 ---
 

@@ -31,10 +31,10 @@ project-orchestrator 代替 code-architecture-reviewer 完成了审核
 ### 已执行
 1. ✅ 创建独立 QA 任务 (t_3516618a)
 2. ✅ 创建独立 Reviewer 任务 (t_e923d87e)
-3. ✅ 生成 QA 报告: `docs/QA-REPORT-P0-002.md`
-4. ✅ 生成 Reviewer 报告: `docs/REVIEWER-REPORT-P0-002.md`
-5. ✅ 生成审计报告: `docs/AUDIT-P0-002.md`
-6. ✅ 生成最终报告: `docs/P0-002-FINAL-REPORT.md`
+3. ✅ 生成 QA 报告: `docs/qa-reviews/QA-REPORT-P0-002.md`
+4. ✅ 生成 Reviewer 报告: `docs/qa-reviews/REVIEWER-REPORT-P0-002.md`
+5. ✅ 生成审计报告: `docs/qa-reviews/AUDIT-P0-002.md`
+6. ✅ 生成最终报告: `docs/archive/P0-002-FINAL-REPORT.md`
 
 ### QA 结论
 - Build: PASS
@@ -73,4 +73,4 @@ project-orchestrator 代替 code-architecture-reviewer 完成了审核
 ---
 
 **审计人**: project-orchestrator
-**报告存档**: docs/AUDIT-P0-002.md
+**报告存档**: docs/qa-reviews/AUDIT-P0-002.md

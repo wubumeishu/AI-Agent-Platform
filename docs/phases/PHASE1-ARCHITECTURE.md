@@ -615,6 +615,6 @@ backend/
 
 | 文件 | 路径 | 内容 |
 |------|------|------|
-| 本文档 | `docs/PHASE1-ARCHITECTURE.md` | 完整架构设计 |
-| API 设计 | `docs/PHASE1-API-SPEC.md` | 详细接口规范 |
+| 本文档 | `docs/phases/PHASE1-ARCHITECTURE.md` | 完整架构设计 |
+| API 设计 | `docs/phases/PHASE1-API-SPEC.md` | 详细接口规范 |
 | DB Schema | `docs/PHASE1-DB-SCHEMA.md` | SQL 建表语句 |

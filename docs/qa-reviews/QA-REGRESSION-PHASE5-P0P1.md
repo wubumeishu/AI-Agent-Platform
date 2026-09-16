@@ -104,4 +104,4 @@ pytest tests/test_private_domain.py tests/test_integration.py tests/test_nurture
   - `import_gate.py` / `check_openapi_prefix.py`（双前缀=0）
 - 服务日志: `uvicorn_8103_r2.log`
 - 测试库: `ai_agent_platform_test`（已按当前模型重建 + 种子 4 行）
-- 上游报告: `H:/AI-Agent-Platform/docs/QA-REPORT-PHASE5-PRIVATE-DOMAIN.md`
+- 上游报告: `H:/AI-Agent-Platform/docs/qa-reviews/QA-REPORT-PHASE5-PRIVATE-DOMAIN.md`
