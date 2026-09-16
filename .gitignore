@@ -41,7 +41,21 @@ Thumbs.db
 src-tauri/gen/
 src-tauri/capabilities/
 
+# kanban agent worktrees + scratch (never commit)
+.worktrees/
+nul
+backend/nul
+
+# Python byte-compile artifacts
+__pycache__/
+*.pyc
+*.pyo
+
 # agent scratch (never commit)
+.cache/
+*.patch
+backend/run_server.out
+backend/tmp*.ini
 backend/_[^_]*
 backend/**/_[^_]*.py
 backend/**/_[^_]*.json
