@@ -103,7 +103,7 @@ async def convert_lead_to_customer(
             "extra_info": {
                 "source_lead_id": str(lead_id),
                 "source_type": lead.source_type,
-                "converted_at": datetime.utcnow().isoformat(),
+                "converted_at": datetime.now(timezone.utc).isoformat(),
             }
         }
         customer = Customer(**customer_data)
@@ -239,7 +239,7 @@ async def _get_conversion_result(db: AsyncSession, customer_id: UUID, lead_id: U
             "customer_id": str(lead.customer_id) if lead and lead.customer_id else None,
         } if lead else None,
         "private_channel": channel_info,
-        "converted_at": datetime.utcnow().isoformat(),
+        "converted_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -297,7 +297,7 @@ async def associate_customer_with_channel(
         "channel_id": str(channel.id),
         "channel_name": channel.name,
         "channel_type": channel.channel_type,
-        "updated_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -400,7 +400,7 @@ async def apply_nurture_plan_to_customer(
     application_record = {
         "plan_id": str(plan_id),
         "customer_id": str(customer_id),
-        "applied_at": datetime.utcnow().isoformat(),
+        "applied_at": datetime.now(timezone.utc).isoformat(),
         "status": "applied",
     }
     
@@ -410,7 +410,7 @@ async def apply_nurture_plan_to_customer(
     
     applied_count = plan.performance_metrics.get("applied_count", 0) + 1
     plan.performance_metrics["applied_count"] = applied_count
-    plan.performance_metrics["last_applied_at"] = datetime.utcnow().isoformat()
+    plan.performance_metrics["last_applied_at"] = datetime.now(timezone.utc).isoformat()
     
     await db.commit()
     await db.refresh(plan)
@@ -428,7 +428,7 @@ async def apply_nurture_plan_to_customer(
             "id": str(customer.id),
             "name": customer.name,
         },
-        "applied_at": datetime.utcnow().isoformat(),
+        "applied_at": datetime.now(timezone.utc).isoformat(),
         "added_to_segment": bool(plan.target_segment_id),
     }
 
@@ -565,7 +565,7 @@ async def create_deal_with_customer(
         "value": deal_item.value,
         "currency": deal_item.currency,
         "status": deal_item.status,
-        "created_at": deal_item.created_at.isoformat() if deal_item.created_at else datetime.utcnow().isoformat(),
+        "created_at": deal_item.created_at.isoformat() if deal_item.created_at else datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -686,7 +686,7 @@ async def validate_data_consistency(
     
     return {
         "account_id": str(account_id),
-        "validated_at": datetime.utcnow().isoformat(),
+        "validated_at": datetime.now(timezone.utc).isoformat(),
         "issues_count": len(issues),
         "issues": issues,
         "is_consistent": len(issues) == 0,
@@ -751,7 +751,7 @@ async def fix_orphaned_references(
     return {
         "account_id": str(account_id),
         "fixes_applied": fixes_applied,
-        "fixed_at": datetime.utcnow().isoformat(),
+        "fixed_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -822,5 +822,5 @@ async def get_integration_stats(
                 "active_with_segments": active_plans,
             },
         },
-        "calculated_at": datetime.utcnow().isoformat(),
+        "calculated_at": datetime.now(timezone.utc).isoformat(),
     }

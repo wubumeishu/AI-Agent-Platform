@@ -14,8 +14,9 @@ is trivially unit-testable and reproducible. It answers three questions:
 The DB adapter (:mod:`nurture_execution_service`) translates rows into the
 plain-descriptor shape this module consumes and persists the results back.
 Timezone policy: all aware datetimes are UTC; naive inputs are normalised to
-UTC (the private_domain models use naive ``utcnow()``; the workflow engine
-uses aware UTC - we tolerate both).
+UTC (the private_domain models now use aware-UTC
+``datetime.now(timezone.utc)`` per ADR-019; the workflow engine
+uses aware UTC - both are aware UTC now).
 """
 from __future__ import annotations
 

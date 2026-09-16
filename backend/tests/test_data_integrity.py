@@ -5,7 +5,7 @@ Phase 5: Private Domain Data Integrity Testing
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 # Fixtures
@@ -473,7 +473,7 @@ class TestFollowUpTaskIntegration:
         from app.schemas.private_domain import FollowUpTaskCreate
         
         account_id = uuid4()
-        due_date = datetime.utcnow() + timedelta(days=7)
+        due_date = datetime.now(timezone.utc) + timedelta(days=7)
         
         data = FollowUpTaskCreate(
             account_id=account_id,
@@ -489,10 +489,10 @@ class TestFollowUpTaskIntegration:
         """测试跟进任务逾期检测"""
         from app.services.private_domain import check_and_update_overdue_tasks
         from app.db.models.private_domain import FollowUpTask
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
         
         account_id = uuid4()
-        past_date = datetime.utcnow() - timedelta(days=1)
+        past_date = datetime.now(timezone.utc) - timedelta(days=1)
         
         # Create overdue tasks
         task1 = FollowUpTask(

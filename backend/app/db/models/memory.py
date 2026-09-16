@@ -1,5 +1,5 @@
 """Memory Model - Short-term and Long-term Memory System"""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from uuid import UUID, uuid4
 
@@ -24,8 +24,8 @@ class Memory(Base):
     confidence = Column(Float, nullable=False, default=1.0)  # 0-1, AI生成记忆的可信度
     tags = Column(JSONB, nullable=False, default=list)
     metadata_ = Column(JSONB, nullable=False, default=dict)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
     
     # 关系
@@ -54,7 +54,7 @@ class ActivityLog(Base):
     description = Column(Text, nullable=True)
     related_lead_id = Column(PGUUID(as_uuid=True), ForeignKey("lead.id", ondelete="SET NULL"), nullable=True)
     metadata_ = Column(JSONB, nullable=False, default=dict)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
     
     __table_args__ = (
         Index('idx_activity_customer', 'customer_id'),
@@ -75,7 +75,7 @@ class MemoryFragment(Base):
     fragment_order = Column(Integer, nullable=False, default=0)  # 片段顺序
     content = Column(Text, nullable=False)
     embedding = Column(JSONB, nullable=True)  # 向量嵌入（用于语义搜索）
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     
     # 关系
     memory = relationship("Memory", back_populates="memories")
@@ -99,7 +99,7 @@ class ConversationSummary(Base):
     key_points = Column(JSONB, nullable=False, default=list)  # 关键点列表
     sentiment = Column(String(20), nullable=True)  # positive, neutral, negative
     action_items = Column(JSONB, nullable=False, default=list)  # 待办事项
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
     is_deleted = Column(Boolean, nullable=False, default=False)
     
     __table_args__ = (
@@ -122,8 +122,8 @@ class ContextWindow(Base):
     compressed_count = Column(Integer, nullable=False, default=0)
     last_compressed_at = Column(DateTime(timezone=True), nullable=True)
     summary_id = Column(PGUUID(as_uuid=True), ForeignKey("conversation_summary.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     __table_args__ = (
         Index('idx_context_window_conversation', 'conversation_id'),

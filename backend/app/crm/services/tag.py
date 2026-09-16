@@ -4,7 +4,7 @@
 支持标签层级结构、批量关联、统计功能
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
@@ -239,7 +239,7 @@ async def update_tag(db: AsyncSession, tag_id: UUID, updates: dict) -> Optional[
                 raise ValueError("设置父标签会导致循环引用")
         setattr(tag, key, value)
     
-    tag.updated_at = datetime.utcnow()
+    tag.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(tag)
     

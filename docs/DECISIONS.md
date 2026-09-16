@@ -457,6 +457,22 @@ unification. Pre-existing naive `datetime.utcnow()` writes into *already*
 usage, nurture plan) drift on the JST server but were not part of this DDL
 unification; recorded as a separate follow-up (P3 hygiene card).
 
+**Follow-up closure (P6AN-17 follow-up, t_f73ccb29):** the out-of-scope naive
+write-sites enumerated above are now flipped. Every remaining
+`datetime.utcnow()` write in `backend/app` is gone (verified by source ban in
+`tests/test_p6an17_followup_utcnow_flip.py`): the ORM `default=`/`onupdate=`
+hooks on the account/agent/audit_log/memory/persona/platform/private_domain/
+prompt_template models, the private-domain & segment & content & nurture &
+integration & CRM write-sites, and the bitbrowser provider mock/status stamps
+all now use `datetime.now(timezone.utc)`. No naive-into-naive safe spots were
+found (no `DateTime(timezone=False)` columns remain in app DDL). Test-fixture
+naive `utcnow()` assignments into timestamptz ORM columns in the suite were
+flipped to aware-UTC for consistency. Regression:
+`tests/test_p6an17_followup_utcnow_flip.py` (47 green) + P2-3
+`tests/test_p6an17_p23_time_column_unify.py` + analytics + CRM suites re-run
+green (4 known pre-existing FastAPI-0.141 route-scan nits unchanged, out of
+scope per P2-3).
+
 **Source:** P6AN-16 architecture review t_67f18134 §4.2 P2-3, decided by
 project-orchestrator t_adcbbb97, implemented by backend-engineer t_ccd4f521,
 2026-09-15.

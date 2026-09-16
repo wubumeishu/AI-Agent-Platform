@@ -1,7 +1,7 @@
 """
 Content Library Service: Search, Usage Statistics, Category Management
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 
@@ -139,8 +139,8 @@ async def track_content_usage(db: AsyncSession, content_id: UUID, account_id: UU
         return None
     
     item.usage_count += 1
-    item.last_used_at = datetime.utcnow()
-    item.updated_at = datetime.utcnow()
+    item.last_used_at = datetime.now(timezone.utc)
+    item.updated_at = datetime.now(timezone.utc)
     
     await db.commit()
     await db.refresh(item)

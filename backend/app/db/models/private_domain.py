@@ -1,5 +1,5 @@
 """Private Domain Models for Phase 5"""
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, List
 from uuid import UUID, uuid4
@@ -101,8 +101,8 @@ class PrivateChannel(Base):
     message_count = Column(Integer, nullable=False, default=0)
     tags = Column(JSON, nullable=True, default=list)
     extra_config = Column(JSON, nullable=True, default=dict)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -141,8 +141,8 @@ class NurturePlan(Base):
     target_segment_id = Column(PGUUID(as_uuid=True), ForeignKey("customer_segment.id"), nullable=True)
     trigger_conditions = Column(JSON, nullable=True, default=list)
     performance_metrics = Column(JSON, nullable=True, default=dict)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -178,7 +178,7 @@ class NurturePlanItem(Base):
     config = Column(JSON, nullable=True, default=dict)
     status = Column(String(20), nullable=False, default="active")
     is_deleted = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     plan = relationship("NurturePlan", back_populates="plan_items")
@@ -214,8 +214,8 @@ class ContentItem(Base):
     version = Column(Integer, nullable=False, default=1)
     usage_count = Column(Integer, nullable=False, default=0)  # Times used
     last_used_at = Column(DateTime(timezone=True), nullable=True)  # Last usage timestamp
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -257,8 +257,8 @@ class FollowUpTask(Base):
     notes = Column(Text, nullable=True)
     created_by = Column(String(100), nullable=True)
     assigned_to = Column(String(100), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
@@ -286,8 +286,8 @@ class CustomerSegment(Base):
     filter_config = Column(JSON, nullable=True, default=dict)
     member_count = Column(Integer, nullable=False, default=0)
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -310,7 +310,7 @@ class SegmentMember(Base):
     segment_id = Column(PGUUID(as_uuid=True), ForeignKey("customer_segment.id", ondelete="CASCADE"), nullable=False)
     customer_id = Column(PGUUID(as_uuid=True), ForeignKey("customer.id", ondelete="CASCADE"), nullable=False)
     added_by = Column(String(100), nullable=True)
-    added_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    added_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("idx_segment_member_segment", "segment_id"),
@@ -335,8 +335,8 @@ class DealPipeline(Base):
     pipeline_type = Column(String(50), nullable=False, default="sales")
     stages = Column(JSON, nullable=True, default=list)  # ordered stage definitions
     is_default = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -362,8 +362,8 @@ class DealStage(Base):
     probability = Column(Integer, nullable=False, default=0)  # win probability %
     config = Column(JSON, nullable=True, default=dict)
     status = Column(String(20), nullable=False, default=DealStageStatus.ACTIVE.value)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -397,8 +397,8 @@ class DealItem(Base):
     status = Column(String(20), nullable=False, default=DealItemStatus.OPEN.value)
     winner_reason = Column(String(200), nullable=True)
     loser_reason = Column(String(200), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships

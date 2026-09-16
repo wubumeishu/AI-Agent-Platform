@@ -1,5 +1,5 @@
 """Persona model for Phase 1"""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import UUID, uuid4
 
@@ -20,8 +20,8 @@ class Persona(Base):
     personality = Column(JSONB, nullable=False, default=dict)
     version = Column(Integer, nullable=False, default=1)
     parent_id = Column(PGUUID(as_uuid=True), ForeignKey("persona.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships

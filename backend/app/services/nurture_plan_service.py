@@ -1,7 +1,7 @@
 """
 Enhanced Nurture Plan Service with step management and state transitions
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 
@@ -366,7 +366,7 @@ async def update_nurture_plan(
         plan.sequence_steps = []  # keep legacy column empty (retired)
         steps_rows = await _reconcile_plan_items(db, plan_id, list(sequence_steps))
     
-    plan.updated_at = datetime.utcnow()
+    plan.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(plan)
     
@@ -403,7 +403,7 @@ async def delete_nurture_plan(db: AsyncSession, plan_id: UUID, account_id: Optio
     _require_plan_ownership(plan, account_id)
 
     plan.is_deleted = True
-    plan.updated_at = datetime.utcnow()
+    plan.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return True
 
@@ -467,7 +467,7 @@ async def transition_nurture_plan_status(
     
     # Execute transition
     plan.status = new_status
-    plan.updated_at = datetime.utcnow()
+    plan.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(plan)
     

@@ -21,7 +21,7 @@ The pure trigger rule (evaluate_intent_event) has no DB dependency.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.events.domain_events import DomainEvent, get_event_bus
 from app.crm.services.conversation_lead_bridge import (
@@ -293,8 +293,8 @@ class TestCustomerLevelDedup:
         new_lead.tags = []
         new_lead.lifecycle_logs = []
         # get_lead's dict build reads .created_at/.updated_at; give real values.
-        new_lead.created_at = datetime.utcnow()
-        new_lead.updated_at = datetime.utcnow()
+        new_lead.created_at = datetime.now(timezone.utc)
+        new_lead.updated_at = datetime.now(timezone.utc)
 
         # call sequence: (1) load conv (2) per-conversation dedup -> None
         # (3) get_lead(new_lead)  [customer dedup disabled -> no 3rd query]

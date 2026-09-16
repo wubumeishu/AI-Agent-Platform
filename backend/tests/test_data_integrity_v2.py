@@ -4,7 +4,7 @@ Phase 5: Private Domain Data Integrity Testing
 """
 import pytest
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 # Test 1: 数据模型字段完整性测试
@@ -364,8 +364,8 @@ class TestDataConstraintIntegrity:
         )
         
         # Set timestamps manually (as SQLAlchemy would do on insert)
-        channel.created_at = datetime.utcnow()
-        channel.updated_at = datetime.utcnow()
+        channel.created_at = datetime.now(timezone.utc)
+        channel.updated_at = datetime.now(timezone.utc)
         
         # Verify timestamps are set
         assert channel.created_at is not None

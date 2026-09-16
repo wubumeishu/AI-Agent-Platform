@@ -111,7 +111,7 @@ class DBContentProvider:
         try:
             from datetime import datetime as _dt
             item.usage_count = int(getattr(item, "usage_count", 0) or 0) + 1
-            item.last_used_at = to_utc(_dt.utcnow())
+            item.last_used_at = to_utc(_dt.now(timezone.utc))
             await self.db.flush()
         except Exception:  # noqa: BLE001
             logger.debug("usage bump failed; ignoring", exc_info=True)

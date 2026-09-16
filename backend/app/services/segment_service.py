@@ -1,7 +1,7 @@
 """
 Enhanced Customer Segment Service with rule engine integration
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 
@@ -173,7 +173,7 @@ async def update_customer_segment(
     for field, value in update_data.items():
         setattr(segment, field, value)
     
-    segment.updated_at = datetime.utcnow()
+    segment.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(segment)
     
@@ -212,7 +212,7 @@ async def delete_customer_segment(
         return False
     
     segment.is_deleted = True
-    segment.updated_at = datetime.utcnow()
+    segment.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return True
 
@@ -283,7 +283,7 @@ async def add_segment_member(
     
     # Update count
     segment.member_count += 1
-    segment.last_synced_at = datetime.utcnow()
+    segment.last_synced_at = datetime.now(timezone.utc)
     
     await db.commit()
     
@@ -332,7 +332,7 @@ async def remove_segment_member(
     segment = segment_result.scalar_one_or_none()
     if segment:
         segment.member_count = max(0, segment.member_count - 1)
-        segment.last_synced_at = datetime.utcnow()
+        segment.last_synced_at = datetime.now(timezone.utc)
     
     await db.commit()
     
@@ -441,7 +441,7 @@ async def bulk_add_members(
     
     if added:
         segment.member_count += len(added)
-        segment.last_synced_at = datetime.utcnow()
+        segment.last_synced_at = datetime.now(timezone.utc)
         await db.commit()
     
     return {

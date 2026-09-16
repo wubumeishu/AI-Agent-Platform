@@ -4,7 +4,7 @@ Lead Service Tests: CRUD + Intent Scoring + Status Transitions
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
 from app.db.models.lead import Lead
@@ -34,8 +34,8 @@ def sample_lead():
         status="new",
         notes="测试 Lead",
         operator="test_user",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
         is_deleted=False,
     )
     return lead
@@ -129,8 +129,8 @@ class TestLeadCRUD:
         
         # refresh 后的 lead
         sample_lead_data["id"] = uuid4()
-        sample_lead_data["created_at"] = datetime.utcnow()
-        sample_lead_data["updated_at"] = datetime.utcnow()
+        sample_lead_data["created_at"] = datetime.now(timezone.utc)
+        sample_lead_data["updated_at"] = datetime.now(timezone.utc)
         new_lead = Lead(**sample_lead_data)
         
         mock_result = MagicMock()
@@ -256,8 +256,8 @@ class TestStatusTransitions:
             id=uuid4(),
             lifecycle_stage_code="潜客",
             status="contacted",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
             is_deleted=False,
         )
         
@@ -376,8 +376,8 @@ class TestLeadFromConversation:
             status="new",
             notes="自动从对话创建，来源：产品咨询",
             operator="system",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
             is_deleted=False,
         )
         mock_db.refresh.side_effect = lambda obj: setattr(obj, 'id', new_lead.id)

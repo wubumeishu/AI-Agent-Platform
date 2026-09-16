@@ -10,7 +10,7 @@ API 文档: https://bitbrowser.ai/api-docs
 import os
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 
@@ -94,7 +94,7 @@ class BitBrowserProvider(BrowserProvider):
                 "status": "mock_mode",
                 "message": "BitBrowser SDK 未安装，使用模拟模式",
                 "endpoint": self.endpoint,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         
         try:
@@ -112,7 +112,7 @@ class BitBrowserProvider(BrowserProvider):
                     "status": "connected",
                     "message": "BitBrowser 连接正常",
                     "endpoint": self.endpoint,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             else:
                 return {
@@ -121,7 +121,7 @@ class BitBrowserProvider(BrowserProvider):
                     "status": "error",
                     "message": f"BitBrowser 返回错误: {response.status_code}",
                     "endpoint": self.endpoint,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
         except Exception as e:
             logger.error(f"BitBrowser connection test failed: {e}")
@@ -131,7 +131,7 @@ class BitBrowserProvider(BrowserProvider):
                 "status": "error",
                 "message": f"连接失败: {str(e)}",
                 "endpoint": self.endpoint,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
     
     async def list_profiles(self) -> List[Dict[str, Any]]:
@@ -186,10 +186,10 @@ class BitBrowserProvider(BrowserProvider):
         if not self._sdk_available:
             # 模拟创建
             mock_profile = {
-                "id": f"mock_{datetime.utcnow().timestamp()}",
+                "id": f"mock_{datetime.now(timezone.utc).timestamp()}",
                 "name": name,
                 "status": "idle",
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "profile_id": f"bitbrowser_profile_{len(_MOCK_PROFILES) + 1}",
             }
             _MOCK_PROFILES.append(mock_profile)

@@ -1,5 +1,5 @@
 """Platform model for Phase 1 Resource Layer"""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import UUID, uuid4
 
@@ -21,7 +21,7 @@ class Platform(Base):
     adapter_class = Column(String(200), nullable=True)
     config = Column(JSONB, nullable=False, default={})
     status = Column(String(20), nullable=False, default="active")
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships

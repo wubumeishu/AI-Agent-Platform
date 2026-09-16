@@ -1,5 +1,5 @@
 """Prompt template model for Phase 2"""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import UUID, uuid4
 
@@ -24,8 +24,8 @@ class PromptTemplate(Base):
     version = Column(Integer, nullable=False, default=1)
     parent_id = Column(PGUUID(as_uuid=True), ForeignKey("prompt_template.id", ondelete="SET NULL"), nullable=True)
     is_baseline = Column(Boolean, nullable=False, default=False)  # Whether this is the baseline version
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -49,7 +49,7 @@ class PromptTemplateUsage(Base):
     template_id = Column(PGUUID(as_uuid=True), ForeignKey("prompt_template.id", ondelete="CASCADE"), nullable=False)
     rendered_content = Column(Text, nullable=False)
     variables_used = Column(JSONB, nullable=False, default=dict)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     template = relationship("PromptTemplate", back_populates="usages")

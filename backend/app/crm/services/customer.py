@@ -534,5 +534,5 @@ async def merge_customers(
         "source_customer_id": str(source_customer_id),
         "target_customer_id": str(target_customer_id),
         "migrated_identities": migrated_count,
-        "merged_at": datetime.utcnow().isoformat(),
+        "merged_at": datetime.now(timezone.utc).isoformat(),
     }

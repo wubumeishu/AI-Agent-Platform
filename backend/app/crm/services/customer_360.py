@@ -2,7 +2,7 @@
 Customer 360 Service: Aggregates all customer-related data
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
@@ -196,7 +196,7 @@ def _suggest_next_action(customer: Customer, leads: List[Lead], conversations: L
     # 检查最近对话是否需要回复
     from datetime import timedelta
     recent_conversations = [c for c in conversations if c.status == "active" and c.created_at and
-                           datetime.utcnow() - c.created_at.replace(tzinfo=None) < timedelta(days=7)]
+                           datetime.now(timezone.utc) - c.created_at.replace(tzinfo=None) < timedelta(days=7)]
     if recent_conversations:
         suggestions.append({
             "type": "response",
@@ -225,7 +225,7 @@ def _suggest_next_action(customer: Customer, leads: List[Lead], conversations: L
 
     return {
         "suggestions": suggestions,
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 

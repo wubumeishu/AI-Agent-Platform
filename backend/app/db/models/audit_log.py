@@ -8,7 +8,7 @@ leak. Writes are best-effort and ride the caller's transaction (see
 :func:`app.security.audit.record_audit`), so a failed business op rolls back its
 audit row with it.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -46,7 +46,7 @@ class AuditLog(Base):
     action = Column(String(100), nullable=True)
     #: Non-PII context only (ids, old/new status). PII/secrets are never stored.
     detail = Column(JSON, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("idx_audit_log_account", "account_id", "created_at"),

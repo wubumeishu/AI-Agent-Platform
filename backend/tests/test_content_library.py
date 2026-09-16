@@ -37,7 +37,7 @@ def sample_content_item():
         status="published",
         version=1,
         usage_count=5,
-        last_used_at=datetime.utcnow(),
+        last_used_at=datetime.now(timezone.utc),
     )
     item.id = uuid4()
     return item
@@ -481,8 +481,8 @@ class TestContentSearchAdvanced:
         from app.services.content_library import search_content_items
         from datetime import datetime, timedelta
         
-        start_date = datetime.utcnow() - timedelta(days=7)
-        end_date = datetime.utcnow()
+        start_date = datetime.now(timezone.utc) - timedelta(days=7)
+        end_date = datetime.now(timezone.utc)
         
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [sample_content_item]

@@ -1,5 +1,5 @@
 """Account models for Phase 1 Resource Layer"""
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, List
 from uuid import UUID, uuid4
@@ -43,8 +43,8 @@ class Account(Base):
     password_encrypted = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, default=AccountStatus.DISCONNECTED.value)
     last_login = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -69,7 +69,7 @@ class AgentPersonaBinding(Base):
     agent_id = Column(PGUUID(as_uuid=True), ForeignKey("agent.id", ondelete="CASCADE"), primary_key=True)
     persona_id = Column(PGUUID(as_uuid=True), ForeignKey("persona.id", ondelete="CASCADE"), primary_key=True)
     is_primary = Column(Boolean, nullable=False, default=False)
-    bound_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    bound_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships - use string references to avoid circular imports
     account = relationship("Account", back_populates="agent_bindings")
@@ -89,7 +89,7 @@ class AccountBrowserBinding(Base):
 
     account_id = Column(PGUUID(as_uuid=True), ForeignKey("account.id", ondelete="CASCADE"), primary_key=True)
     profile_id = Column(PGUUID(as_uuid=True), ForeignKey("browser_profile.id", ondelete="CASCADE"), primary_key=True)
-    bound_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    bound_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     account = relationship("Account", back_populates="browser_bindings")
@@ -109,7 +109,7 @@ class AccountProxyBinding(Base):
 
     account_id = Column(PGUUID(as_uuid=True), ForeignKey("account.id", ondelete="CASCADE"), primary_key=True)
     proxy_id = Column(PGUUID(as_uuid=True), ForeignKey("proxy.id", ondelete="CASCADE"), primary_key=True)
-    bound_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    bound_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     account = relationship("Account", back_populates="proxy_bindings")
@@ -132,8 +132,8 @@ class BrowserProfile(Base):
     profile_id = Column(String(100), nullable=False)
     name = Column(String(100), nullable=True)
     connection_status = Column(String(20), nullable=False, default="disconnected")
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -161,8 +161,8 @@ class Proxy(Base):
     password_encrypted = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, default=ProxyStatus.ACTIVE.value)
     last_tested = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships

@@ -2,7 +2,7 @@
 Private Domain Services: Private Channel, Nurture Plan, Content Library,
 Follow-up Task, Customer Segment, Deal Pipeline
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -217,7 +217,7 @@ async def update_private_channel(db: AsyncSession, channel_id: UUID, account_id:
     for field, value in update_data.items():
         setattr(channel, field, value)
     
-    channel.updated_at = datetime.utcnow()
+    channel.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(channel)
     
@@ -257,7 +257,7 @@ async def delete_private_channel(db: AsyncSession, channel_id: UUID, account_id:
         return False
     
     channel.is_deleted = True
-    channel.updated_at = datetime.utcnow()
+    channel.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return True
 
@@ -374,7 +374,7 @@ async def delete_nurture_plan(db: AsyncSession, plan_id: UUID, account_id: Optio
     _enforce_ownership(plan, "nurture_plan", account_id)
 
     plan.is_deleted = True
-    plan.updated_at = datetime.utcnow()
+    plan.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return True
 
@@ -496,7 +496,7 @@ async def update_content_item(db: AsyncSession, item_id: UUID, data: ContentItem
     for field, value in update_data.items():
         setattr(item, field, value)
     
-    item.updated_at = datetime.utcnow()
+    item.updated_at = datetime.now(timezone.utc)
     item.version += 1
     await db.commit()
     await db.refresh(item)
@@ -533,7 +533,7 @@ async def delete_content_item(db: AsyncSession, item_id: UUID, account_id: Optio
 
     item.is_deleted = True
     item.status = "deleted"
-    item.updated_at = datetime.utcnow()
+    item.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return True
 
@@ -661,7 +661,7 @@ async def update_follow_up_task(db: AsyncSession, task_id: UUID, data: FollowUpT
     for field, value in update_data.items():
         setattr(task, field, value)
     
-    task.updated_at = datetime.utcnow()
+    task.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(task)
     
@@ -700,7 +700,7 @@ async def delete_follow_up_task(db: AsyncSession, task_id: UUID, account_id: Opt
     _enforce_ownership(task, "follow_up_task", account_id)
 
     task.is_deleted = True
-    task.updated_at = datetime.utcnow()
+    task.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return True
 
@@ -743,13 +743,13 @@ async def transition_task_status(
         )
 
     task.status = new_status
-    task.updated_at = datetime.utcnow()
+    task.updated_at = datetime.now(timezone.utc)
 
     # If completing, record result timestamp
     if new_status == "completed":
         if task.result is None:
             task.result = {}
-        task.result["completed_at"] = datetime.utcnow().isoformat()
+        task.result["completed_at"] = datetime.now(timezone.utc).isoformat()
 
     await db.commit()
     await db.refresh(task)
@@ -781,7 +781,7 @@ async def check_and_update_overdue_tasks(
     account_id: UUID,
 ) -> Dict[str, Any]:
     """Check for overdue tasks and update their status"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Find pending or in_progress tasks that are past due date
     result = await db.execute(
@@ -816,7 +816,7 @@ async def get_upcoming_reminders(
     hours_ahead: int = 24,
 ) -> List[Dict[str, Any]]:
     """Get tasks that need reminders within the specified hours"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     reminder_window = now + __import__("datetime").timedelta(hours=hours_ahead)
 
     result = await db.execute(
@@ -864,7 +864,7 @@ async def get_follow_up_task_stats(
     total = sum(status_counts.values())
 
     # Overdue count (pending/in_progress with past due_date)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     overdue_result = await db.execute(
         select(func.count()).where(
             FollowUpTask.account_id == account_id,
@@ -993,7 +993,7 @@ async def update_customer_segment(db: AsyncSession, segment_id: UUID, data: Cust
     for field, value in update_data.items():
         setattr(segment, field, value)
     
-    segment.updated_at = datetime.utcnow()
+    segment.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(segment)
     
@@ -1024,7 +1024,7 @@ async def delete_customer_segment(db: AsyncSession, segment_id: UUID, account_id
     _enforce_ownership(segment, "customer_segment", account_id)
 
     segment.is_deleted = True
-    segment.updated_at = datetime.utcnow()
+    segment.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return True
 
@@ -1104,7 +1104,7 @@ async def _upsert_deal_stages(db: AsyncSession, pipeline: "Any", stages: List[Di
             stage.probability = probability
             stage.config = config
             stage.status = DealStageStatus.ACTIVE.value
-            stage.updated_at = datetime.utcnow()
+            stage.updated_at = datetime.now(timezone.utc)
         else:
             stage = DealStage(
                 pipeline_id=pipeline.id,
@@ -1124,7 +1124,7 @@ async def _upsert_deal_stages(db: AsyncSession, pipeline: "Any", stages: List[Di
     for s in existing:
         if s.order not in wanted_orders:
             s.is_deleted = True
-            s.updated_at = datetime.utcnow()
+            s.updated_at = datetime.now(timezone.utc)
     await db.flush()
 
     return [
@@ -1211,7 +1211,7 @@ async def update_deal_pipeline(db: AsyncSession, pipeline_id: UUID, data: DealPi
     else:
         stage_rows = await get_deal_stages(db, pipeline.id)
 
-    pipeline.updated_at = datetime.utcnow()
+    pipeline.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(pipeline)
     
@@ -1241,7 +1241,7 @@ async def delete_deal_pipeline(db: AsyncSession, pipeline_id: UUID, account_id: 
     _enforce_ownership(pipeline, "deal_pipeline", account_id)
 
     pipeline.is_deleted = True
-    pipeline.updated_at = datetime.utcnow()
+    pipeline.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return True
 
@@ -1342,7 +1342,7 @@ async def update_deal_stage(db: AsyncSession, stage_id: UUID, data: DealStageUpd
     for field, value in update_data.items():
         setattr(stage, field, value)
     
-    stage.updated_at = datetime.utcnow()
+    stage.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(stage)
     
@@ -1378,7 +1378,7 @@ async def delete_deal_stage(db: AsyncSession, stage_id: UUID, account_id: Option
         _enforce_ownership(p_result.scalar_one_or_none(), "deal_pipeline", account_id)
 
     stage.is_deleted = True
-    stage.updated_at = datetime.utcnow()
+    stage.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return True
 
@@ -1499,7 +1499,7 @@ async def update_deal_item(db: AsyncSession, item_id: UUID, data: DealItemUpdate
     for field, value in update_data.items():
         setattr(item, field, value)
     
-    item.updated_at = datetime.utcnow()
+    item.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(item)
     
@@ -1536,7 +1536,7 @@ async def delete_deal_item(db: AsyncSession, item_id: UUID, account_id: Optional
     _enforce_ownership(item, "deal_item", account_id)
 
     item.is_deleted = True
-    item.updated_at = datetime.utcnow()
+    item.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return True
 
@@ -1584,7 +1584,7 @@ async def transition_deal_item(
     if loser_reason:
         item.loser_reason = loser_reason
 
-    item.updated_at = datetime.utcnow()
+    item.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(item)
 
@@ -1767,7 +1767,7 @@ async def update_channel_connection_status(
     channel.connection_status = connection_status
     if last_connection:
         channel.last_connection = last_connection
-    channel.updated_at = datetime.utcnow()
+    channel.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(channel)

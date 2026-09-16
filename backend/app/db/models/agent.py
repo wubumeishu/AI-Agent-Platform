@@ -1,5 +1,5 @@
 """Agent model for CRM integration"""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import UUID, uuid4
 
@@ -18,8 +18,8 @@ class Agent(Base):
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(String(20), nullable=False, default="active")  # active, inactive, paused
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships
@@ -46,12 +46,12 @@ class AgentCustomerBinding(Base):
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     agent_id = Column(PGUUID(as_uuid=True), ForeignKey("agent.id", ondelete="CASCADE"), nullable=False)
     customer_id = Column(PGUUID(as_uuid=True), ForeignKey("customer.id", ondelete="CASCADE"), nullable=False)
-    assigned_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    assigned_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     assigned_by = Column(PGUUID(as_uuid=True), nullable=True)  # User who assigned
     notes = Column(Text, nullable=True)
     is_deleted = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     agent = relationship("Agent", back_populates="customer_bindings")

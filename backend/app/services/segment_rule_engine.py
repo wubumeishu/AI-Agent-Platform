@@ -2,7 +2,7 @@
 Customer Segment Rule Engine
 Supports: tag matching, lifecycle stage matching, behavior conditions
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 
@@ -333,7 +333,7 @@ async def sync_segment_members(
     
     # Update segment
     segment.member_count = len(new_member_ids)
-    segment.last_synced_at = datetime.utcnow()
+    segment.last_synced_at = datetime.now(timezone.utc)
     
     await db.commit()
     

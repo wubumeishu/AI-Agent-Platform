@@ -440,10 +440,10 @@ class TestFollowUpTask:
     async def test_check_and_update_overdue_tasks(self, mock_db, task_create_data):
         """Test checking and updating overdue tasks"""
         from app.services.private_domain import check_and_update_overdue_tasks
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         # Create overdue tasks
-        past_date = datetime.utcnow() - timedelta(days=1)
+        past_date = datetime.now(timezone.utc) - timedelta(days=1)
         task1 = FollowUpTask(
             account_id=task_create_data.account_id,
             task_type="wechat",
@@ -473,10 +473,10 @@ class TestFollowUpTask:
     async def test_get_upcoming_reminders(self, mock_db, task_create_data):
         """Test getting upcoming reminders"""
         from app.services.private_domain import get_upcoming_reminders
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         # Create task due within 24 hours
-        future_date = datetime.utcnow() + timedelta(hours=12)
+        future_date = datetime.now(timezone.utc) + timedelta(hours=12)
         task = FollowUpTask(
             account_id=task_create_data.account_id,
             task_type="wechat",
@@ -511,7 +511,7 @@ class TestFollowUpTask:
     async def test_get_follow_up_task_stats(self, mock_db, task_create_data):
         """Test getting follow-up task statistics"""
         from app.services.private_domain import get_follow_up_task_stats
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         # Track call count to simulate different queries
         call_count = [0]
@@ -1199,7 +1199,7 @@ class TestChannelConnectionStatus:
     async def test_update_channel_connection_status(self, mock_db, channel_create_data):
         """Test updating channel connection status"""
         from app.services.private_domain import update_channel_connection_status
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         channel = PrivateChannel(**channel_create_data.model_dump())
         channel.id = uuid4()
@@ -1209,7 +1209,7 @@ class TestChannelConnectionStatus:
         mock_db.execute.return_value = mock_result
 
         result = await update_channel_connection_status(
-            mock_db, channel.id, channel.account_id, "online", datetime.utcnow()
+            mock_db, channel.id, channel.account_id, "online", datetime.now(timezone.utc)
         )
 
         assert result is not None
