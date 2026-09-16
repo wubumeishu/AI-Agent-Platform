@@ -192,12 +192,16 @@ Customer
 
 ### Phase 3 — Automation
 
+> Status (2026-09-15): Workflow / Scheduler module complete (9 tables, nested config API + flat runtime CRUD, cron/interval scheduler with autostart, queue/worker engine with crash recovery, execution log, CRM + Conversation event bridges, 3 frontend views). QA E2E 72/72 live PASS; architecture + reliability reviews closed via t_a3f82e43 APPROVED (regression 357/357, real-Postgres E2E 9/9). ADRs this phase: ADR-013 (ExecutionLog no-FK), ADR-014 (QueueDispatcher + autostart), ADR-015 (CORS handoff to security lane). Summary + reports: `.cache/phases/phase4-workflow-summary/`.
+
 - Workflow
 - Scheduler
 - Task Queue
 - Browser execution
 
-### Phase 4 — CRM
+### Phase 4  CRM
+
+> Status (2026-09-14): CRM / Lead implementation layer complete (Customer, CustomerIdentity, Lead + Intent Scoring, Tags, Lifecycle, Customer 360, integrations; 13/14 board tasks done). Open P0 follow-ups: prod DB missing 7 CRM tables, security (auth/RBAC + PII masking, ADR-011), E2E re-run pending. See docs/phases/PHASE-3-SUMMARY.md.
 
 - Customer
 - Lead
@@ -207,6 +211,8 @@ Customer
 
 ### Phase 5 — Private Domain
 
+> Status (2026-09-14): Private Domain module implementation complete. See docs/PHASE-5-SUMMARY.md; open P0 follow-ups: security (auth/RBAC + sensitive-data protection) and NurturePlan execution engine.
+
 - Private Domain
 - Nurture
 - Content
@@ -214,6 +220,8 @@ Customer
 - Deal
 
 ### Phase 6 — Analytics
+
+> Status (2026-09-15): Phase 6 Analytics & Optimization complete (9 backend + 3 frontend cards). E2E QA P6AN-15 verdict PASS; architecture review P6AN-16 verdict CHANGES_REQUIRED (no P0; P1 analytics-surface auth/tenant isolation FIXED in t_3e806a29 = ADR-018, with P2-4 CORS whitelist; P2-1/2/3/5 filed as P2 follow-up cards P6AN-17). See docs/phases/PHASE-6-SUMMARY.md.
 
 - Dashboard
 - Conversion

@@ -1,0 +1,145 @@
+{
+  "phase": "Phase 6 — Analytics & Optimization",
+  "summary_task": "t_adcbbb97",
+  "generated_at": "2026-09-15 JST",
+  "gate": "RELEASED",
+  "gate_basis": "E2E QA P6AN-15 (t_31ca8734) verdict PASS; arch review P6AN-16 (t_67f18134) CHANGES_REQUIRED with the sole P1 fixed in t_3e806a29 (ADR-018). No P0/P1 left over. Non-blocking P2/P3 known issues tracked below.",
+  "e2e_verdict": "PASS",
+  "arch_review_verdict": "CHANGES_REQUIRED",
+  "p0_leftover": 0,
+  "p1_leftover": 0,
+  "issues": [
+    {
+      "id": "P6AN-KI-01",
+      "severity": "P1",
+      "title": "P1-1 analytics 表面未认证 + 无租户隔离",
+      "status": "fixed",
+      "card": "t_3e806a29",
+      "detail": "/api/v1/analytics/* 全表面 (5 router, 35 端点) 原无 auth / 无租户隔离: 读=跨租户 BI 外泄, CRUD=account_id 自由字段可写任意账户。已修复: 复用 ADR-011 get_current_principal + require_analytics_read/write 双 guard + 读按 account 主体作用域 + CRUD 强制归属 + 缓存键含租户。回归 246 + 新增 54 auth 用例全绿。",
+      "follow_up": null,
+      "downstream_impact": "None — 主链路放行条件已满足, P1 跨租户读/写路径在 guard 层关闭。",
+      "source": "P6AN-16 架构审查 t_67f18134 P1-1 -> t_3e806a29 / ADR-018"
+    },
+    {
+      "id": "P6AN-KI-02",
+      "severity": "P2",
+      "title": "P2-1 成交/converted 口径三种不一致",
+      "status": "open-filed",
+      "card": "t_548dd92e",
+      "detail": "Lead.status=='converted' (P6AN-02/05) vs lifecycle_stage_code 成交 (P6AN-07) vs DealItem.status=='won' (P6AN-06/09) -> 用户跨端点对比 conversion_rate 得不同数字。拟指定 lifecycle_stage_code 成交为主口径, DealItem.won 仅金额, 响应回显 caliber 字段。",
+      "follow_up": "t_548dd92e (backend, P2)",
+      "downstream_impact": "数据可信度; 不阻断 Phase 6 验收, 但影响跨端点报表一致性。",
+      "source": "P6AN-16 §4.3 P2-1"
+    },
+    {
+      "id": "P6AN-KI-03",
+      "severity": "P2",
+      "title": "P2-2 analytics 双挂载约定 / 共享文件热点",
+      "status": "open-filed",
+      "card": "t_ed331329",
+      "detail": "P6AN-01/03/04/05/08 追加共享 routers/analytics.py (并发编辑热点) vs P6AN-02/06/07/09 各自独立 router + BARE 挂载; 边界不统一, 共享文件继续成为并发冲突源。拟冻结共享文件 + 拆分 03/04/05/08 计算端点。",
+      "follow_up": "t_ed331329 (backend, P2)",
+      "downstream_impact": "未来 analytics 扩展的并发协作风险; 非功能缺陷。",
+      "source": "P6AN-16 §2.2 P2-2 (hotspot app/routers/analytics.py + app/schemas/analytics.py)"
+    },
+    {
+      "id": "P6AN-KI-04",
+      "severity": "P2",
+      "title": "P2-3 naive/timestamptz 混合 DDL (反复 bug 类)",
+      "status": "open-filed",
+      "card": "t_ccd4f521",
+      "detail": "lead/customer 为 naive timestamp, conversation/message/agent 为 timestamptz; 每服务 per-table _naive_utc 剥离, P6AN-02 曾抓 3 真实 bug。拟归一迁移统一到 aware-UTC timestamptz 或至少记录约定。",
+      "follow_up": "t_ccd4f521 (backend, P2)",
+      "downstream_impact": "时间比较 bug 类根因; DEF-3 (t_dc92c614) 是其单点症状。",
+      "source": "P6AN-16 §4.2 P2-3"
+    },
+    {
+      "id": "P6AN-KI-05",
+      "severity": "P2",
+      "title": "P2-4 CORS 通配 + credentials",
+      "status": "fixed",
+      "card": "t_3e806a29",
+      "detail": "main.py 原 allow_origins=['*'] + allow_credentials=True (反模式)。已在 t_3e806a29 收敛为 env 驱动白名单 (CORS_ORIGINS, 默认本地 Vite; credentials 仅非通配白名单下允许)。",
+      "follow_up": null,
+      "downstream_impact": "None — 已修复, ADR-015 状态更新为 Implemented。",
+      "source": "P6AN-16 §5.2 P2-4 -> t_3e806a29 / ADR-015"
+    },
+    {
+      "id": "P6AN-KI-06",
+      "severity": "P2",
+      "title": "P2-5 生产库漂移 (缺 028/029 + Phase-5 列)",
+      "status": "open-filed",
+      "card": "t_474490ff",
+      "detail": "prod ai_agent_platform 为 legacy fork stamped 027, 缺 028 analytics 5 表 + 029 experiment_result + Phase-5 列 (deal_item status/account_id/currency/lead_id, follow_up_task.account_id) -> analytics 端点在该生产实例 500。拟 alembic upgrade 至 028/029 或 schema align。",
+      "follow_up": "t_474490ff (backend, P2)",
+      "downstream_impact": "Phase 6 在生产实例不可用直到该卡落地; canonical 测试库不受影响。",
+      "source": "P6AN-16 §5.3 P2-5"
+    },
+    {
+      "id": "P6AN-KI-07",
+      "severity": "P2",
+      "title": "DEF-3 P6AN-05 aware-UTC 时间边界 500",
+      "status": "open-in-flight",
+      "card": "t_dc92c614",
+      "detail": "P6AN-05 leads/conversion aware-UTC 时间边界 -> 500 (naive-UTC 有 workaround, 前端默认路径 200, 不阻断)。其根因为 P2-3 naive/tz 混合 DDL。",
+      "follow_up": "t_dc92c614 (backend, P2, running)",
+      "downstream_impact": "有 naive-UTC workaround, 不阻断; 建议 Phase 7 前清掉。",
+      "source": "P6AN-15 E2E QA t_31ca8734 §3 DEF-3"
+    },
+    {
+      "id": "P6AN-KI-08",
+      "severity": "P3",
+      "title": "P3-1 by-agent 双归属模型并存",
+      "status": "archived",
+      "card": null,
+      "detail": "message 量用 ChannelMessage.agent_id 作用域, conversation 作用域走 agent_customer_binding; 两种 agent 归属模型并存, 已文档化, 规模化后统一。",
+      "follow_up": null,
+      "downstream_impact": "None blocking; 规模化时处理。",
+      "source": "P6AN-16 §6 P3-1"
+    },
+    {
+      "id": "P6AN-KI-09",
+      "severity": "P3",
+      "title": "P3-2 experiment summary unpaged O(N) 内存",
+      "status": "archived",
+      "card": null,
+      "detail": "experiment results/summary 的 _all_results_unpaged 将全部快照载入 Python 取 latest/(variant,metric); curated 规模无碍, 规模化后需 SQL 侧窗口。",
+      "follow_up": null,
+      "downstream_impact": "None blocking; 规模化时处理。",
+      "source": "P6AN-16 §6 P3-2"
+    },
+    {
+      "id": "P6AN-KI-10",
+      "severity": "P3",
+      "title": "P3-3 ROI 成本默认全 0 -> ROI=None",
+      "status": "archived",
+      "card": null,
+      "detail": "未配 ROI_COST_PER_*_CENTS 成本基准则 ROI=None (非 0%), 设计正确; 需运维配置后才出数。",
+      "follow_up": null,
+      "downstream_impact": "None blocking; 运维配置依赖。",
+      "source": "P6AN-16 §6 P3-3"
+    },
+    {
+      "id": "P6AN-KI-11",
+      "severity": "P3",
+      "title": "DEF-8 P6AN-03 test_route_registered 测试器失配",
+      "status": "open-in-flight",
+      "card": "t_645352c1",
+      "detail": "test_analytics_funnel_p6an03.py::TestFunnelApi::test_route_registered 在 FastAPI 0.141.1 _IncludedRouter 嵌套下扫裸 app.routes 不展平 -> 测试 FAIL, 但线上 funnel 200 + 真数据正常 (纯测试器写法瑕疵, 产品无缺陷; 干净 P6AN-14 worktree 2714f37 同样 FAIL)。",
+      "follow_up": "t_645352c1 (backend, P3, running)",
+      "downstream_impact": "None — 回归门禁 272/275 的 3 条 FAIL 中 1 条为此; 不影响产品功能。",
+      "source": "P6AN-15 E2E QA t_31ca8734 §3 DEF-8"
+    },
+    {
+      "id": "P6AN-KI-12",
+      "severity": "P3",
+      "title": "预存共享 test-DB 数据漂移 (回归 272/275 另 2 条 FAIL)",
+      "status": "documented-pre-existing",
+      "card": null,
+      "detail": "2x test_p6an06_private_domain_conversion (reached_customers 期望 2 实得 0) = P6AN-13/14 已记录的共享 test-DB 数据漂移, 非 P6AN-15 本卡引入 (本卡零产品改动, 纯 merge QA 基线)。",
+      "follow_up": null,
+      "downstream_impact": "None for product; regression gate 2/3 FAILs are pre-existing shared-test-DB drift, not Phase 6 defects.",
+      "source": "P6AN-15 E2E QA t_31ca8734 §3 regression gate"
+    }
+  ]
+}
